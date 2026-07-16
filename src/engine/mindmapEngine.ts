@@ -1,9 +1,9 @@
 import type { MindMapData, MindNode, NodeID } from '@/types/mindmap';
+import { calculateLayout as newCalculateLayout } from '@/layout-engine/layoutAdapter';
 
-const DEFAULT_NODE_WIDTH = 120;
-const DEFAULT_NODE_HEIGHT = 40;
-const HORIZONTAL_GAP = 80;
-const VERTICAL_GAP = 20;
+export { newCalculateLayout as calculateLayout };
+export type { LayoutConfig } from './layout';
+export { DEFAULT_LAYOUT_CONFIG } from './layout';
 
 export function createEmptyMindMap(): MindMapData {
   const rootId = 'root';
@@ -18,6 +18,8 @@ export function createEmptyMindMap(): MindMapData {
       },
     },
     version: 1,
+    layout: 'balanced',
+    connectionStyle: 'bezier',
   };
 }
 
@@ -26,15 +28,24 @@ export function addNode(data: MindMapData, parentId: NodeID, label = '分支主�
   const parent = data.nodes[parentId];
   if (!parent) throw new Error(`Parent not found: ${parentId}`);
 
+  // 平衡布局：根节点子节点根据当前左右数量分配到少的一侧
+  let branchSide: 'left' | 'right' | undefined;
+  if (parentId === data.rootId) {
+    const leftCount = parent.children.filter((childId) => data.nodes[childId]?.branchSide === 'left').length;
+    const rightCount = parent.children.filter((childId) => data.nodes[childId]?.branchSide === 'right').length;
+    branchSide = leftCount <= rightCount ? 'left' : 'right';
+  }
+
   const node: MindNode = {
     id,
     label,
     children: [],
     collapsed: false,
     parentId,
+    branchSide,
   };
-  data.nodes[id] = node;
-  parent.children.push(id);
+  data.nodes = { ...data.nodes, [id]: node };
+  data.nodes[parentId] = { ...parent, children: [...parent.children, id] };
   data.version++;
   return node;
 }
@@ -154,6 +165,53 @@ export function findLastSiblingOfRoot(data: MindMapData): NodeID | null {
   return lastLeaf;
 }
 
+export function moveNodeToParent(data: MindMapData, nodeId: NodeID, targetParentId: NodeID): void {
+  const node = data.nodes[nodeId];
+  const targetParent = data.nodes[targetParentId];
+  if (!node || !targetParent) return;
+  if (nodeId === targetParentId) return;
+  if (node.id === data.rootId) return;
+  // 避免把祖先拖到后代下形成环
+  if (isDescendant(data, nodeId, targetParentId)) return;
+
+  if (node.parentId) {
+    const parent = data.nodes[node.parentId];
+    if (parent) {
+      parent.children = parent.children.filter((childId) => childId !== nodeId);
+    }
+  }
+  node.parentId = targetParentId;
+  targetParent.children.push(nodeId);
+  data.version++;
+}
+
+export function reorderNode(data: MindMapData, nodeId: NodeID, insertBeforeSiblingId: NodeID | null): void {
+  const node = data.nodes[nodeId];
+  if (!node || !node.parentId) return;
+  const parent = data.nodes[node.parentId];
+  if (!parent) return;
+  const siblings = parent.children;
+  const currentIndex = siblings.indexOf(nodeId);
+  if (currentIndex === -1) return;
+  siblings.splice(currentIndex, 1);
+  if (insertBeforeSiblingId) {
+    const targetIndex = siblings.indexOf(insertBeforeSiblingId);
+    if (targetIndex === -1) siblings.push(nodeId);
+    else siblings.splice(targetIndex, 0, nodeId);
+  } else {
+    siblings.push(nodeId);
+  }
+  data.version++;
+}
+
+function isDescendant(data: MindMapData, ancestorId: NodeID, targetId: NodeID): boolean {
+  const node = data.nodes[targetId];
+  if (!node) return false;
+  if (node.parentId === ancestorId) return true;
+  if (!node.parentId) return false;
+  return isDescendant(data, ancestorId, node.parentId);
+}
+
 export function removeNode(data: MindMapData, id: NodeID): void {
   const node = data.nodes[id];
   if (!node) return;
@@ -207,53 +265,27 @@ export function findNodeAt(data: MindMapData, x: number, y: number): MindNode | 
 }
 
 export function calculateTreeLayout(data: MindMapData): MindMapData {
-  const root = data.nodes[data.rootId];
-  if (!root) return data;
-
-  // measure text-based sizes (simplified: fixed now, later measure via canvas)
-  Object.values(data.nodes).forEach((node: MindNode) => {
-    node.width = Math.max(DEFAULT_NODE_WIDTH, node.label.length * 14 + 24);
-    node.height = DEFAULT_NODE_HEIGHT;
-  });
-
-  layoutNode(data, root, 0, 0);
-  return data;
+  return newCalculateLayout(data);
 }
 
-function layoutNode(data: MindMapData, node: MindNode, x: number, y: number): number {
-  node.x = x;
-  node.y = y;
+export function calculateBalancedTreeLayout(data: MindMapData): MindMapData {
+  return { ...data, layout: 'balanced' };
+}
 
-  if (node.collapsed || node.children.length === 0) {
-    return node.height ?? DEFAULT_NODE_HEIGHT;
-  }
+export function calculateOrgLayout(data: MindMapData): MindMapData {
+  return { ...data, layout: 'org' };
+}
 
-  let currentY = y;
-  let totalHeight = 0;
+export function calculateTimelineLayout(data: MindMapData): MindMapData {
+  return { ...data, layout: 'timeline' };
+}
 
-  node.children.forEach((childId: NodeID) => {
-    const child = data.nodes[childId];
-    if (!child) return;
-    const childHeight = layoutNode(
-      data,
-      child,
-      x + (node.width ?? DEFAULT_NODE_WIDTH) + HORIZONTAL_GAP,
-      currentY
-    );
-    currentY += childHeight + VERTICAL_GAP;
-    totalHeight += childHeight + VERTICAL_GAP;
-  });
+export function calculateFishboneLayout(data: MindMapData): MindMapData {
+  return { ...data, layout: 'fishbone' };
+}
 
-  totalHeight -= VERTICAL_GAP;
-
-  // center parent vertically relative to its children
-  const firstChild = data.nodes[node.children[0]];
-  const lastChild = data.nodes[node.children[node.children.length - 1]];
-  if (firstChild && lastChild && firstChild.y !== undefined && lastChild.y !== undefined) {
-    node.y = (firstChild.y + lastChild.y) / 2;
-  }
-
-  return totalHeight;
+export function setLayout(data: MindMapData, layout: MindMapData['layout']): MindMapData {
+  return { ...data, layout };
 }
 
 function collectDescendants(data: MindMapData, id: NodeID): NodeID[] {

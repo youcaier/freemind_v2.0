@@ -9,7 +9,6 @@ import {
   addNode,
   addSiblingNode as addSiblingNodeEngine,
   removeNode,
-  findNodeAt,
   calculateTreeLayout,
   cloneSubtree,
   insertSubtree,
@@ -18,11 +17,14 @@ import {
   findFirstChild,
   findParent,
   findLastLeaf,
+  moveNodeToParent,
+  reorderNode as reorderNodeEngine,
 } from '@/engine/mindmapEngine';
 
 export function useMindMap() {
   const [data, setData] = useState<MindMapData>(() => calculateTreeLayout(createEmptyMindMap()));
   const [selectedId, setSelectedId] = useState<NodeID | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<NodeID>>(new Set());
   const [editingId, setEditingId] = useState<NodeID | null>(null);
   const editingRef = useRef<HTMLInputElement | null>(null);
 
@@ -33,13 +35,35 @@ export function useMindMap() {
   const canRedo = historyIndex < history.length - 1;
   const isHistoryActionRef = useRef(false);
 
-  const selectNode = useCallback((id: NodeID | null) => {
+  const setSingleSelect = (id: NodeID | null) => {
     setSelectedId(id);
+    setSelectedIds(id ? new Set([id]) : new Set());
+  };
+
+  const selectNode = useCallback((id: NodeID | null, mode: 'replace' | 'toggle' = 'replace') => {
+    if (mode === 'replace') {
+      setSingleSelect(id);
+    } else if (id) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedId(next.size === 1 ? Array.from(next)[0] : next.size > 1 ? id : null);
+        return next;
+      });
+    }
+    setEditingId(null);
+  }, []);
+
+  const selectNodes = useCallback((ids: Set<NodeID>) => {
+    setSelectedIds(ids);
+    setSelectedId(ids.size === 1 ? Array.from(ids)[0] : null);
     setEditingId(null);
   }, []);
 
   const startEdit = useCallback((id: NodeID) => {
     setSelectedId(id);
+    setSelectedIds(new Set([id]));
     setEditingId(id);
   }, []);
 
@@ -83,15 +107,26 @@ export function useMindMap() {
     });
   }, []);
 
-  const addChildNode = useCallback(
-    (parentId: NodeID) => {
+  const addChildNodes = useCallback(
+    (parentIds: Set<NodeID>) => {
       setData((prev) => {
+        const ids = Array.from(parentIds).filter((id) => prev.nodes[id]);
+        if (ids.length === 0) return prev;
         const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
-        addNode(next, parentId, '分支主题');
+        ids.forEach((parentId) => {
+          addNode(next, parentId, '分支主题');
+        });
         return calculateTreeLayout(next);
       });
     },
     []
+  );
+
+  const addChildNode = useCallback(
+    (parentId: NodeID) => {
+      addChildNodes(new Set([parentId]));
+    },
+    [addChildNodes]
   );
 
   const addSiblingNode = useCallback(
@@ -108,30 +143,30 @@ export function useMindMap() {
   );
 
   const deleteSelected = useCallback(() => {
-    if (!selectedId || selectedId === data.rootId) return;
+    const ids = Array.from(selectedIds).filter((id) => id !== data.rootId && !data.nodes[id]?.children.length);
+    if (ids.length === 0) return;
     setData((prev) => {
-      const target = prev.nodes[selectedId];
-      if (!target || target.children.length > 0) return prev;
       const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
-      removeNode(next, selectedId);
+      ids.forEach((id) => removeNode(next, id));
       return calculateTreeLayout(next);
     });
     setSelectedId(null);
+    setSelectedIds(new Set());
     setEditingId(null);
-  }, [selectedId, data.rootId]);
+  }, [selectedIds, data.rootId, data.nodes]);
 
   const deleteSubtree = useCallback(() => {
-    if (!selectedId || selectedId === data.rootId) return;
+    const ids = Array.from(selectedIds).filter((id) => id !== data.rootId);
+    if (ids.length === 0) return;
     setData((prev) => {
-      const target = prev.nodes[selectedId];
-      if (!target) return prev;
       const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
-      removeNode(next, selectedId);
+      ids.forEach((id) => removeNode(next, id));
       return calculateTreeLayout(next);
     });
     setSelectedId(null);
+    setSelectedIds(new Set());
     setEditingId(null);
-  }, [selectedId, data.rootId]);
+  }, [selectedIds, data.rootId]);
 
   const toggleSelected = useCallback(() => {
     if (!selectedId) return;
@@ -216,6 +251,28 @@ export function useMindMap() {
     }
   }, []);
 
+  const moveNode = useCallback((nodeId: NodeID, targetParentId: NodeID) => {
+    setData((prev) => {
+      const node = prev.nodes[nodeId];
+      const target = prev.nodes[targetParentId];
+      if (!node || !target || nodeId === targetParentId || node.id === prev.rootId) return prev;
+      if (node.parentId === targetParentId) return prev;
+      const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
+      moveNodeToParent(next, nodeId, targetParentId);
+      return calculateTreeLayout(next);
+    });
+  }, []);
+
+  const reorderNode = useCallback((nodeId: NodeID, insertBeforeSiblingId: NodeID | null) => {
+    setData((prev) => {
+      const node = prev.nodes[nodeId];
+      if (!node || !node.parentId) return prev;
+      const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
+      reorderNodeEngine(next, nodeId, insertBeforeSiblingId);
+      return calculateTreeLayout(next);
+    });
+  }, []);
+
   // 撤销/重做
   const undo = useCallback(() => {
     if (!canUndo) return;
@@ -249,6 +306,7 @@ export function useMindMap() {
   const moveSelection = useCallback((direction: 'up' | 'down' | 'left' | 'right' | 'home' | 'end') => {
     if (!selectedId) {
       setSelectedId(data.rootId);
+      setSelectedIds(new Set([data.rootId]));
       return;
     }
     let nextId: NodeID | null = null;
@@ -272,38 +330,27 @@ export function useMindMap() {
         nextId = findPrevSibling(data, selectedId);
         break;
     }
-    if (nextId) setSelectedId(nextId);
+    if (nextId) {
+      setSelectedId(nextId);
+      setSelectedIds(new Set([nextId]));
+    }
   }, [data, selectedId]);
 
-  const handleCanvasClick = useCallback(
-    (e: React.MouseEvent, container: HTMLElement | null) => {
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const node = findNodeAt(data, x, y);
-      if (node) {
-        selectNode(node.id);
-      } else {
-        selectNode(null);
-      }
-    },
-    [data, selectNode]
-  );
+  const changeLayout = useCallback((layout: MindMapData['layout']) => {
+    setData((prev) => calculateTreeLayout({ ...prev, layout }));
+  }, []);
 
-  const handleCanvasDoubleClick = useCallback(
-    (e: React.MouseEvent, container: HTMLElement | null) => {
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const node = findNodeAt(data, x, y);
-      if (node) {
-        startEdit(node.id);
-      }
-    },
-    [data, startEdit]
-  );
+  const changeConnectionStyle = useCallback((connectionStyle: MindMapData['connectionStyle']) => {
+    setData((prev) => calculateTreeLayout({ ...prev, connectionStyle }));
+  }, []);
+
+  const changeConnectionColor = useCallback((connectionColor: string) => {
+    setData((prev) => calculateTreeLayout({ ...prev, connectionColor }));
+  }, []);
+
+  const changeConnectionWidth = useCallback((connectionWidth: number) => {
+    setData((prev) => calculateTreeLayout({ ...prev, connectionWidth }));
+  }, []);
 
   return {
     data,
@@ -315,6 +362,7 @@ export function useMindMap() {
     commitEdit,
     changeNodeStyle,
     addChildNode,
+    addChildNodes,
     addSiblingNode,
     deleteSelected,
     deleteSubtree,
@@ -322,14 +370,20 @@ export function useMindMap() {
     copyNode,
     cutNode,
     pasteNode,
+    moveNode,
+    reorderNode,
+    selectedIds,
+    selectNodes,
     clipboard,
     undo,
     redo,
     canUndo,
     canRedo,
     moveSelection,
-    handleCanvasClick,
-    handleCanvasDoubleClick,
+    changeLayout,
+    changeConnectionStyle,
+    changeConnectionColor,
+    changeConnectionWidth,
     setData,
   };
 }

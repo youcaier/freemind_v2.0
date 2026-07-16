@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "freemind_v20",
-        "width": 800,
-        "height": 600
+        "title": "FreeMind v2.0",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {

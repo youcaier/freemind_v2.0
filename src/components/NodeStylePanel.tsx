@@ -93,20 +93,21 @@ export function NodeStylePanel({
         left: '50%',
         transform: 'translate(-50%, -50%)',
         zIndex: 1100,
-        background: '#fff',
-        border: '1px solid #ddd',
+        background: 'var(--bg-toolbar)',
+        border: '1px solid var(--node-border)',
         borderRadius: 8,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
         padding: 16,
         width: 280,
         maxHeight: '80vh',
         overflow: 'auto',
+        color: 'var(--text-primary)',
       }}
       onClick={(e) => e.stopPropagation()}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <strong>节点样式</strong>
-        <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18 }}>×</button>
+        <button onClick={onClose} style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, color: 'var(--text-primary)' }}>×</button>
       </div>
 
       <Section label="背景色">
@@ -119,7 +120,7 @@ export function NodeStylePanel({
                 width: 24,
                 height: 24,
                 borderRadius: 4,
-                border: localStyle.background === color ? '2px solid #333' : '1px solid #ddd',
+                border: localStyle.background === color ? '2px solid var(--text-primary)' : '1px solid var(--node-border)',
                 background: color,
                 cursor: 'pointer',
               }}
@@ -133,7 +134,7 @@ export function NodeStylePanel({
           type="color"
           value={localStyle.color || '#333333'}
           onChange={(e) => updateStyle({ color: e.target.value })}
-          style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer' }}
+          style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', background: 'transparent' }}
         />
       </Section>
 
@@ -142,7 +143,7 @@ export function NodeStylePanel({
           type="color"
           value={localStyle.borderColor || '#4ECDC4'}
           onChange={(e) => updateStyle({ borderColor: e.target.value })}
-          style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer' }}
+          style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', background: 'transparent' }}
         />
       </Section>
 
@@ -178,8 +179,9 @@ export function NodeStylePanel({
               style={{
                 flex: 1,
                 padding: '6px 0',
-                border: `1px solid ${localStyle.shape === shape ? '#4ECDC4' : '#ddd'}`,
-                background: localStyle.shape === shape ? '#e6f9f7' : '#fff',
+                border: `1px solid ${localStyle.shape === shape ? 'var(--accent-color)' : 'var(--node-border)'}`,
+                background: localStyle.shape === shape ? 'var(--highlight-bg)' : 'var(--node-bg)',
+                color: 'var(--text-primary)',
                 borderRadius: 4,
                 cursor: 'pointer',
                 fontSize: 12,
@@ -201,8 +203,8 @@ export function NodeStylePanel({
                 width: 28,
                 height: 28,
                 borderRadius: 4,
-                border: `1px solid ${localIcon === ic ? '#4ECDC4' : '#ddd'}`,
-                background: localIcon === ic ? '#e6f9f7' : '#fff',
+                border: `1px solid ${localIcon === ic ? 'var(--accent-color)' : 'var(--node-border)'}`,
+                background: localIcon === ic ? 'var(--highlight-bg)' : 'var(--node-bg)',
                 cursor: 'pointer',
               }}
             >
@@ -218,7 +220,7 @@ export function NodeStylePanel({
           value={localTags}
           onChange={(e) => updateTags(e.target.value)}
           placeholder="标签1, 标签2"
-          style={{ width: '100%', padding: '6px 8px', border: '1px solid #ddd', borderRadius: 4 }}
+          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--node-border)', borderRadius: 4, background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
         />
       </Section>
 
@@ -250,7 +252,7 @@ export function NodeStylePanel({
           onChange={(e) => updateNote(e.target.value)}
           placeholder="添加备注..."
           rows={3}
-          style={{ width: '100%', padding: '6px 8px', border: '1px solid #ddd', borderRadius: 4, resize: 'vertical' }}
+          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--node-border)', borderRadius: 4, resize: 'vertical', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
         />
       </Section>
 
@@ -260,7 +262,7 @@ export function NodeStylePanel({
           value={localHyperlink}
           onChange={(e) => updateHyperlink(e.target.value)}
           placeholder="https://..."
-          style={{ width: '100%', padding: '6px 8px', border: '1px solid #ddd', borderRadius: 4 }}
+          style={{ width: '100%', padding: '6px 8px', border: '1px solid var(--node-border)', borderRadius: 4, background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
         />
       </Section>
     </div>
@@ -270,7 +272,7 @@ export function NodeStylePanel({
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>{label}</label>
+      <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>{label}</label>
       {children}
     </div>
   );
@@ -283,8 +285,9 @@ function ToggleButton({ active, onClick, children }: { active: boolean; onClick:
       style={{
         flex: 1,
         padding: '6px 12px',
-        border: `1px solid ${active ? '#4ECDC4' : '#ddd'}`,
-        background: active ? '#e6f9f7' : '#fff',
+        border: `1px solid ${active ? 'var(--accent-color)' : 'var(--node-border)'}`,
+        background: active ? 'var(--highlight-bg)' : 'var(--node-bg)',
+        color: 'var(--text-primary)',
         borderRadius: 4,
         cursor: 'pointer',
         fontWeight: active ? 'bold' : 'normal',

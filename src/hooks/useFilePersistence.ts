@@ -1,31 +1,111 @@
-import { useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import type { MindMapData } from '@/types/mindmap';
 
 const FILE_EXTENSION = 'freemind';
 const FILE_FILTER = { name: 'Freemind', extensions: [FILE_EXTENSION] };
+const RECENT_FILES_KEY = 'freemind-recent-files';
+const AUTO_SAVE_KEY = 'freemind-auto-save';
+const MAX_RECENT_FILES = 10;
+
+function loadRecentFiles(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_FILES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter((p) => typeof p === 'string');
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function saveRecentFiles(files: string[]) {
+  localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(files.slice(0, MAX_RECENT_FILES)));
+}
+
+function loadAutoSaveSetting(): boolean {
+  try {
+    return localStorage.getItem(AUTO_SAVE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 export function useFilePersistence() {
   const [currentPath, setCurrentPath] = useState<string | null>(null);
+  const [recentFiles, setRecentFiles] = useState<string[]>(loadRecentFiles);
+  const [isDirty, setIsDirty] = useState(false);
+  const [autoSave, setAutoSave] = useState<boolean>(loadAutoSaveSetting);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
-  const saveFile = async (data: MindMapData, path?: string) => {
-    const targetPath =
-      path ||
-      (await save({
-        defaultPath: `untitled.${FILE_EXTENSION}`,
+  useEffect(() => {
+    localStorage.setItem(AUTO_SAVE_KEY, autoSave ? 'true' : 'false');
+  }, [autoSave]);
+
+  const markDirty = useCallback(() => setIsDirty(true), []);
+  const clearDirty = useCallback(() => setIsDirty(false), []);
+
+  const addRecentFile = useCallback((path: string) => {
+    setRecentFiles((prev) => {
+      const next = [path, ...prev.filter((p) => p !== path)];
+      saveRecentFiles(next);
+      return next;
+    });
+  }, []);
+
+  const removeRecentFile = useCallback((path: string) => {
+    setRecentFiles((prev) => {
+      const next = prev.filter((p) => p !== path);
+      saveRecentFiles(next);
+      return next;
+    });
+  }, []);
+
+  const saveFile = useCallback(
+    async (data: MindMapData, path?: string): Promise<string | null> => {
+      const targetPath =
+        path ||
+        currentPath ||
+        (await save({
+          defaultPath: `untitled.${FILE_EXTENSION}`,
+          filters: [FILE_FILTER],
+        }));
+
+      if (!targetPath) return null;
+
+      const content = JSON.stringify(data, null, 2);
+      await invoke('write_text_file', { path: targetPath, content });
+      setCurrentPath(targetPath);
+      addRecentFile(targetPath);
+      setIsDirty(false);
+      setLastSavedAt(Date.now());
+      return targetPath;
+    },
+    [currentPath, addRecentFile]
+  );
+
+  const saveAs = useCallback(
+    async (data: MindMapData): Promise<string | null> => {
+      const targetPath = await save({
+        defaultPath: currentPath || `untitled.${FILE_EXTENSION}`,
         filters: [FILE_FILTER],
-      }));
+      });
+      if (!targetPath) return null;
 
-    if (!targetPath) return false;
+      const content = JSON.stringify(data, null, 2);
+      await invoke('write_text_file', { path: targetPath, content });
+      setCurrentPath(targetPath);
+      addRecentFile(targetPath);
+      setIsDirty(false);
+      setLastSavedAt(Date.now());
+      return targetPath;
+    },
+    [currentPath, addRecentFile]
+  );
 
-    const content = JSON.stringify(data, null, 2);
-    await invoke('write_text_file', { path: targetPath, content });
-    setCurrentPath(targetPath);
-    return true;
-  };
-
-  const openFile = async (): Promise<MindMapData | null> => {
+  const openFile = useCallback(async (): Promise<MindMapData | null> => {
     const selected = await open({
       filters: [FILE_FILTER],
       multiple: false,
@@ -34,9 +114,46 @@ export function useFilePersistence() {
 
     const content = (await invoke('read_text_file', { path: selected })) as string;
     const data = JSON.parse(content) as MindMapData;
+    if (!data.layout) data.layout = 'balanced';
+    if (!data.connectionStyle) data.connectionStyle = 'bezier';
     setCurrentPath(selected);
+    addRecentFile(selected);
+    setIsDirty(false);
     return data;
-  };
+  }, [addRecentFile]);
 
-  return { currentPath, saveFile, openFile };
+  const openRecentFile = useCallback(
+    async (path: string): Promise<MindMapData | null> => {
+      try {
+        const content = (await invoke('read_text_file', { path })) as string;
+        const data = JSON.parse(content) as MindMapData;
+        if (!data.layout) data.layout = 'balanced';
+        if (!data.connectionStyle) data.connectionStyle = 'bezier';
+        setCurrentPath(path);
+        addRecentFile(path);
+        setIsDirty(false);
+        return data;
+      } catch (e) {
+        // 文件不存在或损坏时从最近列表移除
+        removeRecentFile(path);
+        throw e;
+      }
+    },
+    [addRecentFile, removeRecentFile]
+  );
+
+  return {
+    currentPath,
+    recentFiles,
+    isDirty,
+    autoSave,
+    lastSavedAt,
+    setAutoSave,
+    saveFile,
+    saveAs,
+    openFile,
+    openRecentFile,
+    markDirty,
+    clearDirty,
+  };
 }

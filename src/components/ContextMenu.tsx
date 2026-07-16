@@ -55,10 +55,10 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         left: x,
         top: y,
         zIndex: 1000,
-        background: '#fff',
-        border: '1px solid #ddd',
+        background: 'var(--bg-toolbar)',
+        border: '1px solid var(--node-border)',
         borderRadius: 6,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
         minWidth: 160,
         padding: '4px 0',
       }}
@@ -70,7 +70,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             key={index}
             style={{
               height: 1,
-              background: '#eee',
+              background: 'var(--node-border)',
               margin: '4px 0',
             }}
           />
@@ -90,11 +90,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               border: 'none',
               background: 'transparent',
               cursor: item.disabled ? 'not-allowed' : 'pointer',
-              color: item.disabled ? '#999' : '#333',
+              color: item.disabled ? 'var(--text-secondary)' : 'var(--text-primary)',
               fontSize: 14,
             }}
             onMouseEnter={(e) => {
-              if (!item.disabled) e.currentTarget.style.background = '#f5f5f5';
+              if (!item.disabled) e.currentTarget.style.background = 'var(--button-hover-bg)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';
@@ -102,7 +102,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
           >
             <span>{item.label}</span>
             {item.shortcut && (
-              <span style={{ marginLeft: 'auto', color: '#999', fontSize: 12 }}>{item.shortcut}</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontSize: 12 }}>{item.shortcut}</span>
             )}
           </button>
         )
