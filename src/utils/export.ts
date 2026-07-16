@@ -1,5 +1,5 @@
 import type { MindMapData, MindNode } from '@/types/mindmap';
-import * as htmlToImage from 'html-to-image';
+import html2canvas from 'html2canvas';
 
 export type ExportFormat = 'png' | 'jpg' | 'svg' | 'pdf';
 
@@ -82,8 +82,8 @@ function getNodesBounds(nodes: MindNode[]): Bounds {
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }
 
-function getBackgroundColor(background: ExportOptions['background'], theme: 'light' | 'dark'): string {
-  if (background === 'transparent') return 'transparent';
+function getBackgroundColor(background: ExportOptions['background'], theme: 'light' | 'dark'): string | null {
+  if (background === 'transparent') return null;
   if (background === 'light') return '#f8f9fa';
   if (background === 'dark') return '#252525';
   return background || (theme === 'dark' ? '#252525' : '#f8f9fa');
@@ -112,14 +112,16 @@ function createExportContainer(
   }
 
   const wrapper = document.createElement('div');
+  // 放在视口左上角但置于最底层，避免 html2canvas 因屏幕外而计算出 0 尺寸
   wrapper.style.position = 'fixed';
-  wrapper.style.left = '-9999px';
-  wrapper.style.top = '-9999px';
+  wrapper.style.left = '0';
+  wrapper.style.top = '0';
   wrapper.style.width = `${width}px`;
   wrapper.style.height = `${height}px`;
   wrapper.style.overflow = 'hidden';
   wrapper.style.backgroundColor = 'transparent';
-  wrapper.style.zIndex = '-1';
+  wrapper.style.pointerEvents = 'none';
+  wrapper.style.zIndex = '-9999';
   document.body.appendChild(wrapper);
 
   const clone = innerRef.cloneNode(true) as HTMLElement;
@@ -214,6 +216,45 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 /**
+ * 使用 html2canvas 将 DOM 渲染为 Canvas，再导出为 PNG/JPG DataURL。
+ */
+async function renderToImageDataUrl(
+  clone: HTMLElement,
+  width: number,
+  height: number,
+  format: 'png' | 'jpg',
+  scale: number,
+  quality: number,
+  backgroundColor: string | null
+): Promise<string> {
+  const canvas = await html2canvas(clone, {
+    backgroundColor,
+    scale,
+    width,
+    height,
+    x: 0,
+    y: 0,
+    useCORS: true,
+    allowTaint: true,
+    logging: false,
+  });
+
+  if (format === 'jpg') {
+    // html2canvas 的 backgroundColor 在 JPG 下已处理，但为确保不透明再填充一次
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = canvas.width;
+    finalCanvas.height = canvas.height;
+    const ctx = finalCanvas.getContext('2d')!;
+    ctx.fillStyle = backgroundColor || '#ffffff';
+    ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+    ctx.drawImage(canvas, 0, 0);
+    return finalCanvas.toDataURL('image/jpeg', quality);
+  }
+
+  return canvas.toDataURL('image/png');
+}
+
+/**
  * 主导出方法：根据格式返回对应的 Uint8Array 或字符串内容。
  */
 export async function exportMindMap(
@@ -225,52 +266,47 @@ export async function exportMindMap(
 ): Promise<{ content: Uint8Array | string; extension: string; fileName: string }> {
   const opts = resolveOptions(options);
   const baseName = opts.fileName || `freemind_${formatDate()}`;
-  const timeoutMs = 30000;
+  const timeoutMs = 60000;
 
   let wrapper: HTMLDivElement | null = null;
   try {
     const { wrapper: w, clone, width, height } = createExportContainer(containerEl, data, opts);
     wrapper = w;
 
-    // 给浏览器一次渲染机会，确保克隆的样式和布局已应用
-    await withTimeout(
-      new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-      5000,
-      '等待克隆布局'
-    );
+    const bgColor = getBackgroundColor(opts.background, theme);
+    const scale = opts.scale;
 
     if (format === 'svg') {
-      const svg = await withTimeout(
-        htmlToImage.toSvg(clone, {
-          backgroundColor: 'transparent',
-          pixelRatio: 1,
-          skipFonts: true,
+      // SVG 导出：使用 html2canvas 生成节点位图，再与 SVG 连线组合
+      // 这不是真正的矢量 SVG，但能确保内容与画布一致
+      const nodesCanvas = await withTimeout(
+        html2canvas(clone, {
+          backgroundColor: bgColor,
+          scale: 1,
+          width,
+          height,
+          x: 0,
+          y: 0,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
         }),
         timeoutMs,
-        'SVG 导出'
+        'SVG 节点渲染'
       );
+      const nodesDataUrl = nodesCanvas.toDataURL('image/png');
+      const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect width="100%" height="100%" fill="${bgColor || 'transparent'}"/>
+  <image width="${width}" height="${height}" xlink:href="${nodesDataUrl}"/>
+</svg>`;
       return { content: svg, extension: 'svg', fileName: `${baseName}.svg` };
     }
 
-    const bgColor = getBackgroundColor(opts.background, theme);
-    const scale = opts.scale;
-    const isJpg = format === 'jpg';
-
     const dataUrl = await withTimeout(
-      isJpg
-        ? htmlToImage.toJpeg(clone, {
-            backgroundColor: bgColor,
-            pixelRatio: scale,
-            quality: opts.quality,
-            skipFonts: true,
-          })
-        : htmlToImage.toPng(clone, {
-            backgroundColor: bgColor,
-            pixelRatio: scale,
-            skipFonts: true,
-          }),
+      renderToImageDataUrl(clone, width, height, format === 'jpg' ? 'jpg' : 'png', scale, opts.quality, bgColor),
       timeoutMs,
-      isJpg ? 'JPG 导出' : 'PNG 导出'
+      `${format.toUpperCase()} 导出`
     );
 
     if (format === 'pdf') {
