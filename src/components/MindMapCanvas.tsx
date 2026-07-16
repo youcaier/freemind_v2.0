@@ -244,7 +244,8 @@ ref: React.ForwardedRef<MindMapCanvasRef>
   const handleNodeMouseDown = (nodeId: string, e: React.MouseEvent) => {
     if (editingId) return;
     if (e.button !== 0) return;
-    e.preventDefault();
+    // 不要 e.preventDefault()，否则 WebKit 会阻止后续 double click 事件，
+    // 导致双击无法进入编辑状态。用 CSS user-select: none 避免文本选中。
     e.stopPropagation();
     const additive = e.metaKey || e.ctrlKey || e.shiftKey;
     onSelect(nodeId, additive ? 'toggle' : 'replace');
@@ -698,6 +699,8 @@ function NodeView({
       opacity: dragging ? 0.8 : 1,
       cursor: dragging ? 'grabbing' : 'grab',
       pointerEvents: 'auto',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
     }}
     >
       {editing ? (
