@@ -3,6 +3,7 @@ import {
   MindMapData,
   MindNode,
   NodeID,
+  MindRelation,
 } from '@/types/mindmap';
 import {
   createEmptyMindMap,
@@ -352,6 +353,29 @@ export function useMindMap() {
     setData((prev) => calculateTreeLayout({ ...prev, connectionWidth }));
   }, []);
 
+  const addRelation = useCallback((source: NodeID, target: NodeID, label?: string) => {
+    setData((prev) => {
+      if (!prev.nodes[source] || !prev.nodes[target] || source === target) return prev;
+      const relation: MindRelation = {
+        id: `${source}-${target}-${Date.now()}`,
+        source,
+        target,
+        label,
+        color: '#FF6B6B',
+        style: 'dashed',
+      };
+      const relations = [...(prev.relations ?? []), relation];
+      return calculateTreeLayout({ ...prev, relations });
+    });
+  }, []);
+
+  const removeRelation = useCallback((relationId: string) => {
+    setData((prev) => {
+      const relations = (prev.relations ?? []).filter((r) => r.id !== relationId);
+      return calculateTreeLayout({ ...prev, relations });
+    });
+  }, []);
+
   return {
     data,
     selectedId,
@@ -384,6 +408,8 @@ export function useMindMap() {
     changeConnectionStyle,
     changeConnectionColor,
     changeConnectionWidth,
+    addRelation,
+    removeRelation,
     setData,
   };
 }

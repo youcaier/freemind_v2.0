@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MindMapCanvas, type MindMapCanvasRef } from '@/components/MindMapCanvas';
 import { useMindMap } from '@/hooks/useMindMap';
 import { useFilePersistence } from '@/hooks/useFilePersistence';
 import { calculateTreeLayout } from '@/engine/mindmapEngine';
 import type { MindMapData } from '@/types/mindmap';
+import { ExportDialog } from '@/components/ExportDialog';
+import { exportMindMap, type ExportFormat, type ExportOptions } from '@/utils/export';
+import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import './App.css';
 
 function App() {
@@ -38,6 +42,7 @@ function App() {
     changeConnectionStyle,
     changeConnectionColor,
     changeConnectionWidth,
+    addRelation,
     setData,
   } = useMindMap();
 
@@ -62,10 +67,34 @@ function App() {
   const [searchMatches, setSearchMatches] = useState<string[]>([]);
   const [searchIndex, setSearchIndex] = useState(0);
   const [scale, setScale] = useState(1);
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const isPresentationModeRef = useRef(isPresentationMode);
+  isPresentationModeRef.current = isPresentationMode;
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window === 'undefined') return 'light';
     return (localStorage.getItem('freemind-theme') as 'light' | 'dark') || 'light';
   });
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleExport = useCallback(async (format: ExportFormat, options: ExportOptions) => {
+    const container = canvasContainerRef.current;
+    if (!container) throw new Error('画布容器不存在');
+
+    const { content, fileName } = await exportMindMap(container, data, theme, format, options);
+
+    const targetPath = await save({
+      defaultPath: fileName,
+      filters: [{ name: '导出文件', extensions: [format === 'jpg' ? 'jpg' : format] }],
+    });
+    if (!targetPath) return;
+
+    if (typeof content === 'string') {
+      await invoke('write_text_file', { path: targetPath, content });
+    } else {
+      await invoke('write_binary_file', { path: targetPath, content: Array.from(content) });
+    }
+  }, [data, theme]);
 
   useEffect(() => {
     localStorage.setItem('freemind-theme', theme);
@@ -120,6 +149,14 @@ function App() {
   const selectedIdRef = useRef(selectedId);
   const selectedIdsRef = useRef(selectedIds);
 
+  const togglePresentation = useCallback(async () => {
+    const next = !isPresentationMode;
+    setIsPresentationMode(next);
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().setFullscreen(next);
+  }, [isPresentationMode]);
+  const togglePresentationRef = useRef(togglePresentation);
+
   startEditRef.current = startEdit;
   commitEditRef.current = commitEdit;
   editingIdRef.current = editingId;
@@ -137,6 +174,7 @@ function App() {
   moveSelectionRef.current = moveSelection;
   selectedIdRef.current = selectedId;
   selectedIdsRef.current = selectedIds;
+  togglePresentationRef.current = togglePresentation;
 
   const lastSavedDataRef = useRef<MindMapData>(data);
   const skipDirtyRef = useRef(false);
@@ -177,8 +215,11 @@ function App() {
     import('@tauri-apps/api/event').then(({ listen }) => {
       listen('tauri://close-requested', (event) => {
         if (!isDirtyRef.current) return;
-        // @ts-expect-error Tauri event may expose preventDefault
-        event.preventDefault?.();
+
+        // 阻止默认关闭行为，让用户选择是否保存
+        const closeEvent = (event as unknown as { payload?: { preventDefault?: () => void } }).payload;
+        closeEvent?.preventDefault?.();
+
         const shouldSave = window.confirm('有未保存的更改，是否保存后再关闭？');
         if (shouldSave) {
           saveFileRef.current(dataRef.current, currentPathRef.current ?? undefined).then(() => {
@@ -334,7 +375,9 @@ function App() {
         toggleSelectedRef.current();
       } else if (key === 'Escape') {
         e.preventDefault();
-        if (editingIdRef.current) {
+        if (isPresentationModeRef.current) {
+          togglePresentationRef.current();
+        } else if (editingIdRef.current) {
           commitEditRef.current(editingIdRef.current, dataRef.current.nodes[editingIdRef.current]?.label ?? '');
         } else {
           selectNodeRef.current(null);
@@ -349,6 +392,9 @@ function App() {
       } else if (key === 'End') {
         e.preventDefault();
         moveSelectionRef.current('end');
+      } else if (key === 'F11') {
+        e.preventDefault();
+        togglePresentationRef.current();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -381,6 +427,7 @@ function App() {
 
   return (
     <div className="app" data-theme={theme}>
+      {!isPresentationMode && (
       <div className="toolbar">
         <button onClick={() => openFile().then((loaded) => {
           if (!loaded) return;
@@ -495,8 +542,33 @@ function App() {
         <span style={{ marginLeft: 'auto', fontSize: 12, color: '#666' }}>
           selected: {selectedIds.size} | clipboard: {clipboard ? `${Object.keys(clipboard.nodes).length} nodes` : 'null'}
         </span>
+        <button
+          onClick={togglePresentation}
+          title="全屏/演示模式 (F11)"
+        >
+          🖥️
+        </button>
+        <button
+          onClick={() => {
+            const ids = Array.from(selectedIds);
+            if (ids.length === 2) {
+              addRelation(ids[0], ids[1]);
+            }
+          }}
+          disabled={selectedIds.size !== 2}
+          title="添加关联线（需选中两个节点）"
+        >
+          🔗
+        </button>
+        <button
+          onClick={() => setShowExportDialog(true)}
+          title="导出图片/PDF"
+        >
+          导出
+        </button>
       </div>
-      <div className="canvas-container">
+      )}
+      <div className="canvas-container" ref={canvasContainerRef}>
         <MindMapCanvas
           ref={canvasRef}
           data={data}
@@ -526,6 +598,12 @@ function App() {
           onScaleChange={setScale}
         />
       </div>
+      <ExportDialog
+        open={showExportDialog}
+        theme={theme}
+        onClose={() => setShowExportDialog(false)}
+        onExport={handleExport}
+      />
     </div>
   );
 }

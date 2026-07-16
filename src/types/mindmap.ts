@@ -34,9 +34,19 @@ export interface NodeStyle {
   height?: number;
 }
 
+export interface MindRelation {
+  id: string;
+  source: NodeID;
+  target: NodeID;
+  label?: string;
+  color?: string;
+  style?: 'solid' | 'dashed' | 'dotted';
+}
+
 export interface MindMapData {
   rootId: NodeID;
   nodes: Record<NodeID, MindNode>;
+  relations?: MindRelation[];
   version: number;
   layout?: MindMapLayout;
   connectionStyle?: ConnectionStyle;

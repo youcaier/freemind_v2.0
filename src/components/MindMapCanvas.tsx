@@ -514,6 +514,7 @@ ref: React.ForwardedRef<MindMapCanvasRef>
           }}
         >
           {renderConnections(data, visibleNodes, connectionStyle, data.layout ?? 'balanced')}
+          {renderRelations(data, visibleNodes)}
         </svg>
           {visibleNodes.map((node) => (
           <NodeView
@@ -843,6 +844,62 @@ function renderDefaultConnections(
   return lines;
 }
 
+/** 绘制跨层级关联线（自由连线） */
+function renderRelations(data: MindMapData, visibleNodes: MindNode[]) {
+  const relations = data.relations ?? [];
+  if (relations.length === 0) return null;
+  const visibleSet = new Set(visibleNodes.map((n) => n.id));
+  const lines: React.JSX.Element[] = [];
+
+  relations.forEach((relation) => {
+    const source = data.nodes[relation.source];
+    const target = data.nodes[relation.target];
+    if (!source || !target || !visibleSet.has(source.id) || !visibleSet.has(target.id)) return;
+    if (
+      source.x === undefined ||
+      source.y === undefined ||
+      target.x === undefined ||
+      target.y === undefined
+    ) {
+      return;
+    }
+
+    const { x1, y1, x2, y2 } = connectionAnchors(source, target, 'balanced', data.rootId);
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const path = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+
+    lines.push(
+      <path
+        key={relation.id}
+        d={path}
+        fill="none"
+        stroke={relation.color || '#FF6B6B'}
+        strokeWidth={2}
+        strokeDasharray={relation.style === 'dashed' ? '6,4' : relation.style === 'dotted' ? '2,4' : undefined}
+      />
+    );
+
+    if (relation.label) {
+      lines.push(
+        <text
+          key={`${relation.id}-label`}
+          x={midX}
+          y={midY - 4}
+          textAnchor="middle"
+          fontSize={11}
+          fill={relation.color || '#FF6B6B'}
+          style={{ pointerEvents: 'none' }}
+        >
+          {relation.label}
+        </text>
+      );
+    }
+  });
+
+  return lines;
+}
+
 /** 绘制标准“上-垂-水平-垂-下”的垂直树连线 */
 function renderTopDownTreeConnections(
   data: MindMapData,
@@ -1005,6 +1062,7 @@ function buildConnectionPath(
 
 function NodeContent({ node }: { node: MindNode }) {
   const icon = node.icon ? `${node.icon} ` : '';
+  const html = markdownToHtml(`${icon}${node.label}`);
   return (
     <span
       style={{
@@ -1013,10 +1071,27 @@ function NodeContent({ node }: { node: MindNode }) {
         whiteSpace: 'nowrap',
       }}
       title={node.note ? `${node.label}\n\n${node.note}` : node.label}
-    >
-      {icon}
-      {node.label}
-    </span>
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function markdownToHtml(text: string): string {
+  return (
+    text
+      // 转义 HTML 特殊字符
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      // 加粗 **text**
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // 斜体 *text* 或 _text_
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/_(.+?)_/g, '<em>$1</em>')
+      // 删除线 ~~text~~
+      .replace(/~~(.+?)~~/g, '<del>$1</del>')
+      // 行内代码 `text`
+      .replace(/`(.+?)`/g, '<code style="background:rgba(0,0,0,0.06);padding:1px 4px;border-radius:3px;">$1</code>')
   );
 }
 

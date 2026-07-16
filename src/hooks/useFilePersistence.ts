@@ -33,6 +33,17 @@ function loadAutoSaveSetting(): boolean {
   }
 }
 
+function generateDefaultFileName(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const MM = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  return `${yyyy}${MM}${dd}${hh}${mm}${ss}.${FILE_EXTENSION}`;
+}
+
 export function useFilePersistence() {
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [recentFiles, setRecentFiles] = useState<string[]>(loadRecentFiles);
@@ -69,7 +80,7 @@ export function useFilePersistence() {
         path ||
         currentPath ||
         (await save({
-          defaultPath: `untitled.${FILE_EXTENSION}`,
+          defaultPath: generateDefaultFileName(),
           filters: [FILE_FILTER],
         }));
 
@@ -89,7 +100,7 @@ export function useFilePersistence() {
   const saveAs = useCallback(
     async (data: MindMapData): Promise<string | null> => {
       const targetPath = await save({
-        defaultPath: currentPath || `untitled.${FILE_EXTENSION}`,
+        defaultPath: currentPath || generateDefaultFileName(),
         filters: [FILE_FILTER],
       });
       if (!targetPath) return null;
