@@ -100,6 +100,11 @@ ref: React.ForwardedRef<MindMapCanvasRef>
     pointerOffsetY: number;
   } | null>(null);
 
+  // 基于 mousedown 时间戳检测双击，避免依赖浏览器的 dblclick（Tauri WebView 中
+  // 第一次点击后 React 重渲染会导致 DOM 变化，浏览器可能无法识别为同一元素的两次点击）。
+  const lastMouseDownRef = useRef<{ nodeId: string; time: number } | null>(null);
+  const DBL_CLICK_INTERVAL = 300;
+
   const DRAG_THRESHOLD = 3;
 
   const [view, setView] = useState({ scale: 1, panX: 0, panY: 0 });
@@ -248,6 +253,18 @@ ref: React.ForwardedRef<MindMapCanvasRef>
     // 导致双击无法进入编辑状态。用 CSS user-select: none 避免文本选中。
     e.stopPropagation();
     const additive = e.metaKey || e.ctrlKey || e.shiftKey;
+
+    // 双击检测：基于 mousedown 时间戳，避免 React 重渲染导致 DOM 变化后浏览器无法合成 dblclick
+    const now = Date.now();
+    const last = lastMouseDownRef.current;
+    if (last && last.nodeId === nodeId && now - last.time < DBL_CLICK_INTERVAL) {
+      onStartEdit(nodeId);
+      lastMouseDownRef.current = null;
+      dragStartRef.current = null;
+      return;
+    }
+    lastMouseDownRef.current = { nodeId, time: now };
+
     onSelect(nodeId, additive ? 'toggle' : 'replace');
     if (nodeId !== data.rootId) {
       const node = data.nodes[nodeId];
