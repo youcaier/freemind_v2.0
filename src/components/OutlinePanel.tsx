@@ -31,9 +31,9 @@ export interface OutlinePanelProps {
 export function OutlinePanel({
   data,
   selectedId,
-  editingId,
+  editingId: _editingId,
   onSelect,
-  onStartEdit,
+  onStartEdit: _onStartEdit,
   onCommitEdit,
   onAddChild,
   onAddSibling,
@@ -47,6 +47,7 @@ export function OutlinePanel({
 }: OutlinePanelProps) {
   const [expanded, setExpanded] = useState<Set<NodeID>>(() => new Set([data.rootId]));
   const [editValue, setEditValue] = useState('');
+  const [localEditingId, setLocalEditingId] = useState<NodeID | null>(null);
   const [draggingId, setDraggingId] = useState<NodeID | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: NodeID; position: 'before' | 'after' | 'child' } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -54,31 +55,32 @@ export function OutlinePanel({
   const editInputRef = useRef<HTMLInputElement>(null);
   const editValueRef = useRef('');
 
-  useEffect(() => {
-    if (editingId) {
-      const node = data.nodes[editingId];
-      const value = node?.label ?? '';
-      setEditValue(value);
-      editValueRef.current = value;
-      // 自动聚焦并选中
-      setTimeout(() => {
-        editInputRef.current?.focus();
-        editInputRef.current?.select();
-      }, 0);
-    }
-  }, [editingId, data.nodes]);
+  const startEditing = useCallback((id: NodeID) => {
+    const node = data.nodes[id];
+    if (!node) return;
+    const value = node.label ?? '';
+    setEditValue(value);
+    editValueRef.current = value;
+    setLocalEditingId(id);
+    setTimeout(() => {
+      editInputRef.current?.focus();
+      editInputRef.current?.select();
+    }, 0);
+  }, [data.nodes]);
 
   const commit = useCallback(() => {
-    if (editingId) {
-      onCommitEdit(editingId, editValueRef.current.trim() || '分支主题');
+    if (localEditingId) {
+      onCommitEdit(localEditingId, editValueRef.current.trim() || '分支主题');
     }
-  }, [editingId, onCommitEdit]);
+    setLocalEditingId(null);
+  }, [localEditingId, onCommitEdit]);
 
   const cancel = useCallback(() => {
-    if (editingId) {
-      onCommitEdit(editingId, data.nodes[editingId]?.label ?? '');
+    if (localEditingId) {
+      onCommitEdit(localEditingId, data.nodes[localEditingId]?.label ?? '');
     }
-  }, [editingId, data.nodes, onCommitEdit]);
+    setLocalEditingId(null);
+  }, [localEditingId, data.nodes, onCommitEdit]);
 
   useEffect(() => {
     editValueRef.current = editValue;
@@ -131,12 +133,20 @@ export function OutlinePanel({
     });
   };
 
-  const handleRowClick = (id: NodeID) => {
-    onSelect(id);
-  };
+  const lastClickRef = useRef<{ id: NodeID; time: number } | null>(null);
+  const DBL_CLICK_INTERVAL = 300;
 
-  const handleRowDoubleClick = (id: NodeID) => {
-    onStartEdit(id);
+  const handleRowClick = (id: NodeID) => {
+    if (localEditingId) return;
+    const now = Date.now();
+    const last = lastClickRef.current;
+    if (last && last.id === id && now - last.time < DBL_CLICK_INTERVAL) {
+      lastClickRef.current = null;
+      startEditing(id);
+      return;
+    }
+    lastClickRef.current = { id, time: now };
+    onSelect(id);
   };
 
   const handleDragStart = (e: React.DragEvent, id: NodeID) => {
@@ -261,7 +271,7 @@ export function OutlinePanel({
       }
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      onStartEdit(item.id);
+      startEditing(item.id);
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       if (item.id === data.rootId) return;
@@ -313,7 +323,7 @@ export function OutlinePanel({
       <div className="outline-list" ref={listRef}>
         {flattenTree.map((item) => {
           const isSelected = selectedId === item.id;
-          const isEditing = editingId === item.id;
+          const isEditing = localEditingId === item.id;
           const isDragging = draggingId === item.id;
           const isDropTarget = dropTarget?.id === item.id;
           const dropClass = isDropTarget ? `drop-${dropTarget.position}` : '';
@@ -334,7 +344,6 @@ export function OutlinePanel({
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, item)}
               onClick={() => handleRowClick(item.id)}
-              onDoubleClick={() => handleRowDoubleClick(item.id)}
               onKeyDown={(e) => handleKeyDown(e, item)}
               tabIndex={0}
               data-node-id={item.id}
@@ -342,8 +351,10 @@ export function OutlinePanel({
               <span
                 className={['outline-expand', item.hasChildren ? 'has-children' : ''].join(' ')}
                 onClick={(e) => {
-                  e.stopPropagation();
-                  if (item.hasChildren) toggleExpand(item.id);
+                  if (item.hasChildren) {
+                    e.stopPropagation();
+                    toggleExpand(item.id);
+                  }
                 }}
               >
                 {item.hasChildren ? (expanded.has(item.id) ? '▼' : '▶') : ''}

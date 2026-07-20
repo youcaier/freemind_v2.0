@@ -191,17 +191,10 @@ export function useMindMap() {
   clipboardRef.current = clipboard;
 
   const copyNode = useCallback((id: NodeID) => {
-    console.log('[copyNode] id=', id, 'rootId=', data.rootId);
-    if (id === data.rootId) {
-      console.log('[copyNode] skipped root');
-      return;
-    }
+    if (id === data.rootId) return;
     const node = data.nodes[id];
-    console.log('[copyNode] targetNode=', node);
     const subtree = cloneSubtree(data, id);
-    console.log('[copyNode] subtree=', subtree ? { nodeId: subtree.node.id, nodeCount: Object.keys(subtree.nodes).length } : null);
     if (!subtree) {
-      console.log('[copyNode] subtree null, using fallback');
       const fallback = { nodes: { [id]: { ...node, id, children: [] } }, rootId: id };
       clipboardRef.current = fallback;
       setClipboard(fallback);
@@ -210,7 +203,6 @@ export function useMindMap() {
     const next = { nodes: subtree.nodes, rootId: subtree.node.id };
     clipboardRef.current = next;
     setClipboard(next);
-    console.log('[copyNode] clipboard set nodeCount=', Object.keys(next.nodes).length);
   }, [data, data.rootId]);
 
   const cutNode = useCallback((id: NodeID) => {
@@ -231,24 +223,20 @@ export function useMindMap() {
 
   const pasteNode = useCallback((parentId: NodeID) => {
     const current = clipboardRef.current;
-    console.log('[pasteNode] parentId=', parentId, 'current=', current ? { rootId: current.rootId, nodeCount: Object.keys(current.nodes).length } : null);
     if (!current) return;
     let newId: NodeID | null = null;
     setData((prev) => {
-      console.log('[pasteNode setData] before nodeCount=', Object.keys(prev.nodes).length);
       const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
       try {
         newId = insertSubtree(next, parentId, current, current.rootId);
-        console.log('[pasteNode setData] newId=', newId, 'after nodeCount=', Object.keys(next.nodes).length);
       } catch (e) {
-        console.error('[pasteNode setData] error=', e);
+        console.error('[pasteNode] error=', e);
       }
       return calculateTreeLayout(next);
     });
     if (newId) {
       setSelectedId(newId);
       setEditingId(null);
-      console.log('[pasteNode] selected newId=', newId);
     }
   }, []);
 
