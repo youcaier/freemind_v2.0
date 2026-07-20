@@ -5,6 +5,7 @@ import { useFilePersistence } from '@/hooks/useFilePersistence';
 import { calculateTreeLayout } from '@/engine/mindmapEngine';
 import type { MindMapData } from '@/types/mindmap';
 import { ExportDialog } from '@/components/ExportDialog';
+import { OutlinePanel } from '@/components/OutlinePanel';
 import { exportMindMap, type ExportFormat, type ExportOptions } from '@/utils/export';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -75,6 +76,7 @@ function App() {
     return (localStorage.getItem('freemind-theme') as 'light' | 'dark') || 'light';
   });
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showOutline, setShowOutline] = useState(false);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   const handleExport = useCallback(async (format: ExportFormat, options: ExportOptions) => {
@@ -566,37 +568,65 @@ function App() {
         >
           导出
         </button>
+        <button
+          onClick={() => setShowOutline((v) => !v)}
+          title="切换大纲视图"
+          style={{ fontWeight: showOutline ? 'bold' : 'normal' }}
+        >
+          大纲
+        </button>
       </div>
       )}
-      <div className="canvas-container" ref={canvasContainerRef}>
-        <MindMapCanvas
-          ref={canvasRef}
-          data={data}
-          selectedId={selectedId}
-          editingId={editingId}
-          selectedIds={selectedIds}
-          onSelect={selectNode}
-          onSelectNodes={selectNodes}
-          onStartEdit={startEdit}
-          onCommitEdit={commitEdit}
-          onAddChild={addChildNode}
-          onAddSibling={addSiblingNode}
-          onDelete={deleteSelected}
-          onDeleteSubtree={deleteSubtree}
-          onToggle={toggleSelected}
-          onCopy={copyNode}
-          onCut={cutNode}
-          onPaste={pasteNode}
-          onMoveNode={moveNode}
-          onReorderNode={reorderNode}
-          onChangeStyle={changeNodeStyle}
-          clipboard={clipboard}
-          onUndo={undo}
-          onRedo={redo}
-          connectionStyle={data.connectionStyle || 'bezier'}
-          highlightedIds={searchMatches}
-          onScaleChange={setScale}
-        />
+      <div className="main-content">
+        <div className="canvas-container" ref={canvasContainerRef}>
+          <MindMapCanvas
+            ref={canvasRef}
+            data={data}
+            selectedId={selectedId}
+            editingId={editingId}
+            selectedIds={selectedIds}
+            onSelect={selectNode}
+            onSelectNodes={selectNodes}
+            onStartEdit={startEdit}
+            onCommitEdit={commitEdit}
+            onAddChild={addChildNode}
+            onAddSibling={addSiblingNode}
+            onDelete={deleteSelected}
+            onDeleteSubtree={deleteSubtree}
+            onToggle={toggleSelected}
+            onCopy={copyNode}
+            onCut={cutNode}
+            onPaste={pasteNode}
+            onMoveNode={moveNode}
+            onReorderNode={reorderNode}
+            onChangeStyle={changeNodeStyle}
+            clipboard={clipboard}
+            onUndo={undo}
+            onRedo={redo}
+            connectionStyle={data.connectionStyle || 'bezier'}
+            highlightedIds={searchMatches}
+            onScaleChange={setScale}
+          />
+        </div>
+        {showOutline && (
+          <OutlinePanel
+            data={data}
+            selectedId={selectedId}
+            editingId={editingId}
+            onSelect={selectNode}
+            onStartEdit={startEdit}
+            onCommitEdit={commitEdit}
+            onAddChild={addChildNode}
+            onAddSibling={addSiblingNode}
+            onDelete={deleteSelected}
+            onDeleteSubtree={deleteSubtree}
+            onToggle={toggleSelected}
+            onMoveNode={moveNode}
+            onReorderNode={reorderNode}
+            onClose={() => setShowOutline(false)}
+            theme={theme}
+          />
+        )}
       </div>
       <ExportDialog
         open={showExportDialog}
