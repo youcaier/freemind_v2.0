@@ -6,6 +6,7 @@ import { calculateTreeLayout } from '@/engine/mindmapEngine';
 import type { MindMapData } from '@/types/mindmap';
 import { ExportDialog } from '@/components/ExportDialog';
 import { OutlinePanel } from '@/components/OutlinePanel';
+import { FileMenu } from '@/components/FileMenu';
 import { exportMindMap, type ExportFormat, type ExportOptions } from '@/utils/export';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -431,58 +432,43 @@ function App() {
     <div className="app" data-theme={theme}>
       {!isPresentationMode && (
       <div className="toolbar">
-        <button onClick={() => openFile().then((loaded) => {
-          if (!loaded) return;
-          skipDirtyRef.current = true;
-          setData(calculateTreeLayout(loaded));
-        })}>
-          打开
-        </button>
-        <button onClick={() => saveFile(data, currentPath ?? undefined)}>保存</button>
-        <button onClick={() => saveAs(data)}>另存为</button>
-        {recentFiles.length > 0 && (
-          <select
-            value=""
-            onChange={(e) => {
-              const path = e.target.value;
-              if (!path) return;
-              openRecentFile(path).then((loaded) => {
-                if (loaded) {
-                  skipDirtyRef.current = true;
-                  setData(calculateTreeLayout(loaded));
-                }
-              }).catch(() => {});
-            }}
-            style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13 }}
-          >
-            <option value="">最近文件</option>
-            {recentFiles.map((path) => (
-              <option key={path} value={path} title={path}>
-                {path.split('/').pop() || path.split('\\').pop() || path}
-              </option>
-            ))}
-          </select>
-        )}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={autoSave}
-            onChange={(e) => setAutoSave(e.target.checked)}
-          />
-          自动保存
-        </label>
-        <button onClick={() => {
-          selectNode(null);
-          setData(calculateTreeLayout({
-            rootId: 'root',
-            nodes: {
-              root: { id: 'root', label: '中心主题', children: [], collapsed: false },
-            },
-            version: 1,
-            layout: 'balanced',
-            connectionStyle: 'bezier',
-          }));
-        }}>新建</button>
+        <FileMenu
+          onNew={() => {
+            selectNode(null);
+            setData(calculateTreeLayout({
+              rootId: 'root',
+              nodes: {
+                root: { id: 'root', label: '中心主题', children: [], collapsed: false },
+              },
+              version: 1,
+              layout: 'balanced',
+              connectionStyle: 'bezier',
+            }));
+          }}
+          onOpen={() => {
+            openFile().then((loaded) => {
+              if (!loaded) return;
+              skipDirtyRef.current = true;
+              setData(calculateTreeLayout(loaded));
+            });
+          }}
+          onSave={() => saveFile(data, currentPath ?? undefined)}
+          onSaveAs={() => saveAs(data)}
+          onExport={() => setShowExportDialog(true)}
+          recentFiles={recentFiles}
+          onOpenRecent={(path) => {
+            openRecentFile(path).then((loaded) => {
+              if (loaded) {
+                skipDirtyRef.current = true;
+                setData(calculateTreeLayout(loaded));
+              }
+            }).catch(() => {});
+          }}
+          autoSave={autoSave}
+          onToggleAutoSave={setAutoSave}
+          currentPath={currentPath}
+          isDirty={isDirty}
+        />
         <button onClick={undo} disabled={!canUndo}>
           撤销
         </button>
@@ -561,12 +547,6 @@ function App() {
           title="添加关联线（需选中两个节点）"
         >
           🔗
-        </button>
-        <button
-          onClick={() => setShowExportDialog(true)}
-          title="导出图片/PDF"
-        >
-          导出
         </button>
         <button
           onClick={() => setShowOutline((v) => !v)}
