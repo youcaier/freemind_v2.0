@@ -45,6 +45,11 @@ function App() {
     changeConnectionColor,
     changeConnectionWidth,
     addRelation,
+    addCard,
+    updateCardText,
+    moveCard,
+    deleteCards,
+    setCardColor,
     setData,
   } = useMindMap();
 
@@ -583,6 +588,11 @@ function App() {
             clipboard={clipboard}
             onUndo={undo}
             onRedo={redo}
+            onAddCard={addCard}
+            onUpdateCardText={updateCardText}
+            onMoveCard={moveCard}
+            onDeleteCards={deleteCards}
+            onSetCardColor={setCardColor}
             connectionStyle={data.connectionStyle || 'bezier'}
             highlightedIds={searchMatches}
             onScaleChange={setScale}

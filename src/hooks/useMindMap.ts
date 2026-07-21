@@ -22,17 +22,28 @@ import {
   reorderNode as reorderNodeEngine,
 } from '@/engine/mindmapEngine';
 
-export function useMindMap() {
-  const [data, setData] = useState<MindMapData>(() => calculateTreeLayout(createEmptyMindMap()));
+// 收集节点及其所有后代 id：删除节点/子树时联动清理附属便签
+function collectSubtreeIds(data: MindMapData, id: NodeID): Set<NodeID> {
+  const result = new Set<NodeID>();
+  const walk = (nid: NodeID) => {
+    if (result.has(nid)) return;
+    result.add(nid);
+    data.nodes[nid]?.children.forEach(walk);
+  };
+  walk(id);
+  return result;
+}
+
+export function useMindMap() {  const [data, setData] = useState<MindMapData>(() => calculateTreeLayout(createEmptyMindMap()));
   const [selectedId, setSelectedId] = useState<NodeID | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<NodeID>>(new Set());
   const [editingId, setEditingId] = useState<NodeID | null>(null);
   const editingRef = useRef<HTMLInputElement | null>(null);
 
-  // 撤销/重做历史栈
-  const [history, setHistory] = useState<MindMapData[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const canUndo = historyIndex >= 0;
+  // 撤销/重做历史栈：保存完整状态序列，historyIndex 指向当前状态在栈中的位置
+  const [history, setHistory] = useState<MindMapData[]>(() => [data]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
   const isHistoryActionRef = useRef(false);
 
@@ -148,7 +159,11 @@ export function useMindMap() {
     if (ids.length === 0) return;
     setData((prev) => {
       const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
+      // 先收集将被删除的节点 id，再联动移除其附属便签
+      const removedIds = new Set<NodeID>();
+      ids.forEach((id) => collectSubtreeIds(prev, id).forEach((i) => removedIds.add(i)));
       ids.forEach((id) => removeNode(next, id));
+      if (next.cards) next.cards = next.cards.filter((c) => !removedIds.has(c.nodeId));
       return calculateTreeLayout(next);
     });
     setSelectedId(null);
@@ -161,7 +176,10 @@ export function useMindMap() {
     if (ids.length === 0) return;
     setData((prev) => {
       const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
+      const removedIds = new Set<NodeID>();
+      ids.forEach((id) => collectSubtreeIds(prev, id).forEach((i) => removedIds.add(i)));
       ids.forEach((id) => removeNode(next, id));
+      if (next.cards) next.cards = next.cards.filter((c) => !removedIds.has(c.nodeId));
       return calculateTreeLayout(next);
     });
     setSelectedId(null);
@@ -212,7 +230,9 @@ export function useMindMap() {
       const target = prev.nodes[id];
       if (!target) return prev;
       const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
+      const removedIds = collectSubtreeIds(prev, id);
       removeNode(next, id);
+      if (next.cards) next.cards = next.cards.filter((c) => !removedIds.has(c.nodeId));
       return calculateTreeLayout(next);
     });
     if (selectedId === id) {
@@ -266,7 +286,7 @@ export function useMindMap() {
   const undo = useCallback(() => {
     if (!canUndo) return;
     isHistoryActionRef.current = true;
-    setData(history[historyIndex]);
+    setData(history[historyIndex - 1]);
     setHistoryIndex((i) => i - 1);
   }, [canUndo, history, historyIndex]);
 
@@ -277,14 +297,17 @@ export function useMindMap() {
     setHistoryIndex((i) => i + 1);
   }, [canRedo, history, historyIndex]);
 
-  // 记录操作历史：在 data 变化后自动保存前一个状态
+  // 记录操作历史：data 变化后把新状态追加到历史栈（截断重做尾部）
   const prevDataRef = useRef<MindMapData>(data);
   useEffect(() => {
     if (prevDataRef.current !== data) {
       if (isHistoryActionRef.current) {
         isHistoryActionRef.current = false;
       } else {
-        setHistory((prev) => [...prev.slice(0, historyIndex + 1), prevDataRef.current]);
+        // 必须先把快照存到局部变量：setHistory 的 updater 可能延迟到下次渲染才执行，
+        // 直接读闭包外的可变量会拿到错误的状态
+        const snapshot = data;
+        setHistory((prev) => [...prev.slice(0, historyIndex + 1), snapshot]);
         setHistoryIndex((i) => i + 1);
       }
       prevDataRef.current = data;
@@ -341,8 +364,60 @@ export function useMindMap() {
     setData((prev) => calculateTreeLayout({ ...prev, connectionWidth }));
   }, []);
 
-  const addRelation = useCallback((source: NodeID, target: NodeID, label?: string) => {
+  // ---------- 节点附属便签操作 ----------
+  // 便签数据挂在 MindMapData.cards 上，撤销/重做历史栈自动覆盖便签操作
+
+  // 新建便签：id 在 updater 外预生成并返回，便于画布立即进入编辑态
+  const addCard = useCallback((nodeId: NodeID, dx: number, dy: number): string => {
+    const id = `card-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setData((prev) => {
+      if (!prev.nodes[nodeId]) return prev;
+      return {
+        ...prev,
+        cards: [...(prev.cards ?? []), { id, nodeId, text: '', dx, dy }],
+      };
+    });
+    return id;
+  }, []);
+
+  const updateCardText = useCallback((id: string, text: string) => {
+    setData((prev) => {
+      const cards = prev.cards ?? [];
+      const target = cards.find((c) => c.id === id);
+      if (!target || target.text === text) return prev;
+      return { ...prev, cards: cards.map((c) => (c.id === id ? { ...c, text } : c)) };
+    });
+  }, []);
+
+  // 拖拽便签只改变其相对所属节点的偏移
+  const moveCard = useCallback((id: string, dx: number, dy: number) => {
+    setData((prev) => {
+      const cards = prev.cards ?? [];
+      const target = cards.find((c) => c.id === id);
+      if (!target || (target.dx === dx && target.dy === dy)) return prev;
+      return { ...prev, cards: cards.map((c) => (c.id === id ? { ...c, dx, dy } : c)) };
+    });
+  }, []);
+
+  const deleteCards = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setData((prev) => ({
+      ...prev,
+      cards: (prev.cards ?? []).filter((c) => !idSet.has(c.id)),
+    }));
+  }, []);
+
+  const setCardColor = useCallback((id: string, color: string) => {
+    setData((prev) => {
+      const cards = prev.cards ?? [];
+      const target = cards.find((c) => c.id === id);
+      if (!target || target.color === color) return prev;
+      return { ...prev, cards: cards.map((c) => (c.id === id ? { ...c, color } : c)) };
+    });
+  }, []);
+
+  const addRelation = useCallback((source: NodeID, target: NodeID, label?: string) => {    setData((prev) => {
       if (!prev.nodes[source] || !prev.nodes[target] || source === target) return prev;
       const relation: MindRelation = {
         id: `${source}-${target}-${Date.now()}`,
@@ -398,6 +473,11 @@ export function useMindMap() {
     changeConnectionWidth,
     addRelation,
     removeRelation,
+    addCard,
+    updateCardText,
+    moveCard,
+    deleteCards,
+    setCardColor,
     setData,
   };
 }

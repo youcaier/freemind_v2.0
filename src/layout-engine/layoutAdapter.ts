@@ -15,18 +15,20 @@ import type { MindMapData, MindMapLayout, ConnectionStyle } from '@/types/mindma
 
 /** 根据布局类型选择对应算法 */
 export function calculateLayout(data: MindMapData, startX = 0, startY = 0): MindMapData {
-  const theme = toTheme(data.layout, data.connectionStyle);
-  const root = convertToLayoutTree(data.rootId, data.nodes, undefined, 0, 0);
+  // 复制 nodes 映射：布局结果以克隆节点的方式写回，不能污染与历史快照共享的对象
+  const next: MindMapData = { ...data, nodes: { ...data.nodes } };
+  const theme = toTheme(next.layout, next.connectionStyle);
+  const root = convertToLayoutTree(next.rootId, next.nodes, undefined, 0, 0);
 
-  runLayout(root, data.layout, startX, startY, theme);
+  runLayout(root, next.layout, startX, startY, theme);
 
-  // 将 WorkingNode 的 bbox 写回 data.nodes
-  applyLayoutResult(data, root);
+  // 将 WorkingNode 的 bbox 写回 nodes（克隆节点对象）
+  applyLayoutResult(next, root);
 
   // 将自动层级/分支配色样式合并到节点（不覆盖用户已设置的样式）
-  applyComputedStyles(data, root);
+  applyComputedStyles(next, root);
 
-  return data;
+  return next;
 }
 
 export function toLayoutResultFromData(data: MindMapData, startX = 0, startY = 0): LayoutResult {
@@ -70,10 +72,14 @@ function applyLayoutResult(data: MindMapData, root: WorkingNode): void {
   const visit = (node: WorkingNode) => {
     const target = data.nodes[node.id];
     if (target) {
-      target.x = node.bbox.x;
-      target.y = node.bbox.y;
-      target.width = node.bbox.width;
-      target.height = node.bbox.height;
+      // 写时复制：替换为带坐标的新节点对象，不原地修改共享对象
+      data.nodes[node.id] = {
+        ...target,
+        x: node.bbox.x,
+        y: node.bbox.y,
+        width: node.bbox.width,
+        height: node.bbox.height,
+      };
     }
     if (!node.collapsed) node.children.forEach(visit);
   };
@@ -89,18 +95,27 @@ function applyComputedStyles(data: MindMapData, root: WorkingNode): void {
     const s = computedStyle as { fontSize?: number; fontWeight?: string; color?: string; borderColor?: string };
     const target = data.nodes[id];
     if (!target) return;
-    if (!target.style) target.style = {};
-    if (s.fontSize && target.style.fontSize === undefined) {
-      target.style.fontSize = s.fontSize;
+    const merged = { ...(target.style ?? {}) };
+    let changed = false;
+    if (s.fontSize && merged.fontSize === undefined) {
+      merged.fontSize = s.fontSize;
+      changed = true;
     }
-    if (s.fontWeight && target.style.fontWeight === undefined) {
-      target.style.fontWeight = s.fontWeight as any;
+    if (s.fontWeight && merged.fontWeight === undefined) {
+      merged.fontWeight = s.fontWeight as any;
+      changed = true;
     }
-    if (s.color && target.style.color === undefined) {
-      target.style.color = s.color;
+    if (s.color && merged.color === undefined) {
+      merged.color = s.color;
+      changed = true;
     }
-    if (s.borderColor && target.style.borderColor === undefined) {
-      target.style.borderColor = s.borderColor;
+    if (s.borderColor && merged.borderColor === undefined) {
+      merged.borderColor = s.borderColor;
+      changed = true;
+    }
+    // 有新增计算样式时才克隆节点，避免无意义的引用变化
+    if (changed) {
+      data.nodes[id] = { ...target, style: merged };
     }
   });
 }

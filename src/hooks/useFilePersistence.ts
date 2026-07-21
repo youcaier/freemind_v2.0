@@ -33,8 +33,14 @@ function loadAutoSaveSetting(): boolean {
   }
 }
 
-function generateDefaultFileName(): string {
-  const now = new Date();
+// 兼容旧文件：cards 字段可选；旧版便签墙卡片没有 nodeId（或所属节点已不存在）时直接过滤掉
+function sanitizeCards(data: MindMapData) {
+  if (data.cards) {
+    data.cards = data.cards.filter((c) => c.nodeId && data.nodes[c.nodeId]);
+  }
+}
+
+function generateDefaultFileName(): string {  const now = new Date();
   const yyyy = now.getFullYear();
   const MM = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
@@ -127,6 +133,7 @@ export function useFilePersistence() {
     const data = JSON.parse(content) as MindMapData;
     if (!data.layout) data.layout = 'balanced';
     if (!data.connectionStyle) data.connectionStyle = 'bezier';
+    sanitizeCards(data);
     setCurrentPath(selected);
     addRecentFile(selected);
     setIsDirty(false);
@@ -140,6 +147,7 @@ export function useFilePersistence() {
         const data = JSON.parse(content) as MindMapData;
         if (!data.layout) data.layout = 'balanced';
         if (!data.connectionStyle) data.connectionStyle = 'bezier';
+        sanitizeCards(data);
         setCurrentPath(path);
         addRecentFile(path);
         setIsDirty(false);

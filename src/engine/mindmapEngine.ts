@@ -23,8 +23,8 @@ export function createEmptyMindMap(): MindMapData {
   };
 }
 
-export function addNode(data: MindMapData, parentId: NodeID, label = '分支主题'): MindNode {
-  const id = `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+export function addNode(data: MindMapData, parentId: NodeID, label = '分支主题', forcedId?: NodeID): MindNode {
+  const id = forcedId ?? `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const parent = data.nodes[parentId];
   if (!parent) throw new Error(`Parent not found: ${parentId}`);
 
@@ -105,7 +105,8 @@ export function insertSubtree(data: MindMapData, parentId: NodeID, subtree: { no
   });
   const newRootId = idMap.get(rootId)!;
   data.nodes[newRootId].parentId = parentId;
-  parent.children.push(newRootId);
+  // 写时复制：parent 对象可能与历史快照共享，不能原地 push
+  data.nodes[parentId] = { ...parent, children: [...parent.children, newRootId] };
   data.version++;
   return newRootId;
 }
@@ -177,11 +178,17 @@ export function moveNodeToParent(data: MindMapData, nodeId: NodeID, targetParent
   if (node.parentId) {
     const parent = data.nodes[node.parentId];
     if (parent) {
-      parent.children = parent.children.filter((childId) => childId !== nodeId);
+      // 写时复制：避免原地修改与历史快照共享的节点对象
+      data.nodes[node.parentId] = {
+        ...parent,
+        children: parent.children.filter((childId) => childId !== nodeId),
+      };
     }
   }
-  node.parentId = targetParentId;
-  targetParent.children.push(nodeId);
+  data.nodes[nodeId] = { ...node, parentId: targetParentId };
+  // 上一步可能已替换过 targetParent（父即目标时），需重新读取
+  const tp = data.nodes[targetParentId];
+  data.nodes[targetParentId] = { ...tp, children: [...tp.children, nodeId] };
   data.version++;
 }
 
@@ -190,7 +197,7 @@ export function reorderNode(data: MindMapData, nodeId: NodeID, insertBeforeSibli
   if (!node || !node.parentId) return;
   const parent = data.nodes[node.parentId];
   if (!parent) return;
-  const siblings = parent.children;
+  const siblings = [...parent.children];
   const currentIndex = siblings.indexOf(nodeId);
   if (currentIndex === -1) return;
   siblings.splice(currentIndex, 1);
@@ -201,6 +208,8 @@ export function reorderNode(data: MindMapData, nodeId: NodeID, insertBeforeSibli
   } else {
     siblings.push(nodeId);
   }
+  // 写时复制：避免原地 splice 与历史快照共享的 children 数组
+  data.nodes[node.parentId] = { ...parent, children: siblings };
   data.version++;
 }
 
@@ -217,11 +226,14 @@ export function removeNode(data: MindMapData, id: NodeID): void {
   if (!node) return;
   if (node.id === data.rootId) return;
 
-  // remove from parent's children
+  // remove from parent's children（不可变更新：直接改 parent.children 会污染历史栈里共享的节点对象）
   if (node.parentId) {
     const parent = data.nodes[node.parentId];
     if (parent) {
-      parent.children = parent.children.filter((childId) => childId !== id);
+      data.nodes[node.parentId] = {
+        ...parent,
+        children: parent.children.filter((childId) => childId !== id),
+      };
     }
   }
 
@@ -235,14 +247,16 @@ export function removeNode(data: MindMapData, id: NodeID): void {
 export function updateNodeLabel(data: MindMapData, id: NodeID, label: string): void {
   const node = data.nodes[id];
   if (!node) return;
-  node.label = label;
+  // 写时复制：避免原地修改与历史快照共享的节点对象
+  data.nodes[id] = { ...node, label };
   data.version++;
 }
 
 export function toggleCollapsed(data: MindMapData, id: NodeID): void {
   const node = data.nodes[id];
   if (!node || node.children.length === 0) return;
-  node.collapsed = !node.collapsed;
+  // 写时复制：避免原地修改与历史快照共享的节点对象
+  data.nodes[id] = { ...node, collapsed: !node.collapsed };
   data.version++;
 }
 

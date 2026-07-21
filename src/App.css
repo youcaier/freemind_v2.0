@@ -13,6 +13,8 @@
   --node-border: #dddddd;
   --node-text: #333333;
   --connection-color: #999999;
+  --sticky-link-color: #c4c4c4;
+  --sticky-link-hover-color: #999999;
   --accent-color: #4ECDC4;
   --accent-shadow: rgba(78, 205, 196, 0.3);
   --highlight-bg: #FFFBE6;
@@ -32,6 +34,8 @@
   --node-border: #555555;
   --node-text: #e0e0e0;
   --connection-color: #777777;
+  --sticky-link-color: #5a5a5a;
+  --sticky-link-hover-color: #888888;
   --accent-color: #4ECDC4;
   --accent-shadow: rgba(78, 205, 196, 0.25);
   --highlight-bg: #3d3a1e;
@@ -299,4 +303,114 @@ html, body, #root {
 
 .outline-list::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
+}
+
+
+/* 节点附属便签：便签纸观感（圆角、阴影、pastel 底色） */
+.sticky-card {
+  position: absolute;
+  width: 140px;
+  min-height: 70px;
+  padding: 8px 10px 18px;
+  border-radius: 4px 4px 12px 4px;
+  box-shadow: 2px 3px 8px rgba(0, 0, 0, 0.2);
+  /* 底色为固定 pastel 色，文字保持深色保证 light/dark 主题下都可读 */
+  color: #333333;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: grab;
+  user-select: none;
+  box-sizing: border-box;
+  z-index: 8;
+}
+
+.sticky-card.dragging {
+  cursor: grabbing;
+  opacity: 0.9;
+  z-index: 20;
+}
+
+.sticky-card.editing {
+  cursor: text;
+  z-index: 20;
+}
+
+.sticky-card-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sticky-card-textarea {
+  width: 100%;
+  min-height: 52px;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  box-sizing: border-box;
+}
+
+/* 便签与所属节点的从属连线：细虚线、低对比灰色，hover 便签时加深 */
+.sticky-link {
+  stroke: var(--sticky-link-color);
+}
+
+.sticky-link.hovered {
+  stroke: var(--sticky-link-hover-color);
+}
+
+/* 删除按钮：hover 便签时浮现 */
+.sticky-card-close {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sticky-card:hover .sticky-card-close {
+  opacity: 1;
+}
+
+.sticky-card-close:hover {
+  background: rgba(0, 0, 0, 0.12);
+  color: rgba(0, 0, 0, 0.75);
+}
+
+/* 换色色块：点击循环切换预设色 */
+.sticky-card-swatch {
+  position: absolute;
+  left: 8px;
+  bottom: 5px;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background-clip: padding-box;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.sticky-card:hover .sticky-card-swatch {
+  opacity: 1;
+}
+
+.sticky-card-swatch:hover {
+  transform: scale(1.15);
 }

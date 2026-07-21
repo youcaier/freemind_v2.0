@@ -43,10 +43,22 @@ export interface MindRelation {
   style?: 'solid' | 'dashed' | 'dotted';
 }
 
+/** 便签：挂在某个导图节点上的附属物，坐标为相对节点左上角的偏移，跟随节点移动 */
+export interface StickyCard {
+  id: string;
+  nodeId: NodeID;      // 所属节点
+  text: string;
+  color?: string;      // 便签底色，预设色板
+  dx: number;          // 相对节点左上角的偏移（画布坐标）
+  dy: number;
+}
+
 export interface MindMapData {
   rootId: NodeID;
   nodes: Record<NodeID, MindNode>;
   relations?: MindRelation[];
+  /** 节点附属便签（可选字段，保证旧 .freemind 文件兼容） */
+  cards?: StickyCard[];
   version: number;
   layout?: MindMapLayout;
   connectionStyle?: ConnectionStyle;

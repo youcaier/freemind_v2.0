@@ -1,8 +1,18 @@
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
-import type { MindMapData, MindNode, NodeID } from '@/types/mindmap';
+import type { MindMapData, MindNode, NodeID, StickyCard } from '@/types/mindmap';
 import { findNodeAt } from '@/engine/mindmapEngine';
 import { ContextMenu, ContextMenuItem } from './ContextMenu';
 import { NodeStylePanel } from './NodeStylePanel';
+
+/** 便签预设色板（6 色），点击便签上的色块循环切换 */
+const CARD_COLORS = ['#FFF9C4', '#FFCCBC', '#F8BBD0', '#C8E6C9', '#B3E5FC', '#E1BEE7'];
+const DEFAULT_CARD_COLOR = CARD_COLORS[0];
+/** 便签最小高度，用于新建时垂直居中定位（与 App.css 中 .sticky-card 保持一致） */
+const STICKY_MIN_HEIGHT = 70;
+/** 便签宽度（与 App.css 中 .sticky-card 保持一致），用于从属连线锚点计算 */
+const STICKY_WIDTH = 140;
+/** 双击判定间隔（不用原生 dblclick，Tauri WebView 里不稳定） */
+const CARD_DBL_CLICK_INTERVAL = 300;
 
 interface MindMapCanvasProps {
   data: MindMapData;
@@ -27,6 +37,11 @@ interface MindMapCanvasProps {
   clipboard: { nodes: Record<string, MindNode>; rootId: string } | null;
   onUndo: () => void;
   onRedo: () => void;
+  onAddCard: (nodeId: NodeID, dx: number, dy: number) => string;
+  onUpdateCardText: (id: string, text: string) => void;
+  onMoveCard: (id: string, dx: number, dy: number) => void;
+  onDeleteCards: (ids: string[]) => void;
+  onSetCardColor: (id: string, color: string) => void;
   connectionStyle?: 'bezier' | 'straight' | 'orthogonal' | 'rounded';
   highlightedIds?: string[];
   onScaleChange?: (scale: number) => void;
@@ -64,6 +79,11 @@ export const MindMapCanvas = forwardRef<MindMapCanvasRef, MindMapCanvasProps>(fu
   clipboard,
   onUndo,
   onRedo,
+  onAddCard,
+  onUpdateCardText,
+  onMoveCard,
+  onDeleteCards,
+  onSetCardColor,
   connectionStyle = 'bezier',
   highlightedIds = [],
   onScaleChange,
@@ -101,6 +121,68 @@ ref: React.ForwardedRef<MindMapCanvasRef>
   } | null>(null);
 
   const DRAG_THRESHOLD = 3;
+
+  // ---------- 节点附属便签的画布本地状态 ----------
+  // 编辑中的便签 id（与节点编辑状态 editingId 相互独立）
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  // 便签拖拽中的临时偏移（仅本地预览，松手才提交到数据层）
+  const [cardDrag, setCardDrag] = useState<{ id: string; dx: number; dy: number } | null>(null);
+  const cardDragRef = useRef(cardDrag);
+  cardDragRef.current = cardDrag;
+  // mousedown 时只记录候选拖拽信息，移动超过阈值才真正进入拖拽
+  const cardDragStartRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    baseDx: number;
+    baseDy: number;
+  } | null>(null);
+  // 拖拽刚结束时抑制紧随的 click，避免拖拽被当成双击进入编辑
+  const suppressCardClickRef = useRef(false);
+  // hover 中的便签 id：用于加深其从属连线颜色，强化关联感
+  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+
+  const handleCardMouseDown = (card: StickyCard, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    // 阻止冒泡：便签的按下不能触发节点选中/画布框选/平移
+    e.stopPropagation();
+    if (editingCardId) return;
+    const { x, y } = toCanvas(e.clientX, e.clientY);
+    cardDragStartRef.current = { id: card.id, startX: x, startY: y, baseDx: card.dx, baseDy: card.dy };
+  };
+
+  // 在节点右侧新建便签：默认放在右边缘外 16px、垂直居中，并立即进入编辑
+  const handleAddCard = useCallback(
+    (nodeId: NodeID) => {
+      const node = dataRef.current.nodes[nodeId];
+      if (!node) return;
+      const dx = (node.width ?? 120) + 16;
+      const dy = Math.round(((node.height ?? 40) - STICKY_MIN_HEIGHT) / 2);
+      const id = onAddCard(nodeId, dx, dy);
+      setEditingCardId(id);
+    },
+    [onAddCard]
+  );
+
+  // 提交便签编辑：空文本直接删除该便签（常见于便签交互）
+  const commitCardEdit = useCallback(
+    (id: string, text: string) => {
+      const trimmed = text.trim();
+      if (trimmed) onUpdateCardText(id, trimmed);
+      else onDeleteCards([id]);
+      setEditingCardId(null);
+    },
+    [onUpdateCardText, onDeleteCards]
+  );
+
+  // 点击色块循环切换预设色
+  const cycleCardColor = useCallback(
+    (card: StickyCard) => {
+      const index = CARD_COLORS.indexOf(card.color || DEFAULT_CARD_COLOR);
+      onSetCardColor(card.id, CARD_COLORS[(index + 1) % CARD_COLORS.length]);
+    },
+    [onSetCardColor]
+  );
 
   const [view, setView] = useState({ scale: 1, panX: 0, panY: 0 });
 
@@ -319,6 +401,16 @@ ref: React.ForwardedRef<MindMapCanvasRef>
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // 便签拖拽：更新相对所属节点的偏移预览
+    const cardStart = cardDragStartRef.current;
+    if (cardStart) {
+      const { x, y } = toCanvas(e.clientX, e.clientY);
+      const dx = x - cardStart.startX;
+      const dy = y - cardStart.startY;
+      if (!cardDragRef.current && Math.abs(dx) <= DRAG_THRESHOLD && Math.abs(dy) <= DRAG_THRESHOLD) return;
+      setCardDrag({ id: cardStart.id, dx: cardStart.baseDx + dx, dy: cardStart.baseDy + dy });
+      return;
+    }
     if (boxSelectRef.current) {
       const { x, y } = toCanvas(e.clientX, e.clientY);
       setBoxSelect({ ...boxSelectRef.current, endX: x, endY: y });
@@ -353,6 +445,17 @@ ref: React.ForwardedRef<MindMapCanvasRef>
   };
 
   const handleMouseUp = () => {
+    // 便签拖拽结束：提交新偏移到数据层
+    if (cardDragStartRef.current) {
+      const drag = cardDragRef.current;
+      if (drag) {
+        onMoveCard(drag.id, Math.round(drag.dx), Math.round(drag.dy));
+        suppressCardClickRef.current = true;
+        setCardDrag(null);
+      }
+      cardDragStartRef.current = null;
+      return;
+    }
     if (boxSelectRef.current) {
       const { startX, startY, endX, endY } = boxSelectRef.current;
       const minX = Math.min(startX, endX);
@@ -416,6 +519,29 @@ ref: React.ForwardedRef<MindMapCanvasRef>
 
   const visibleNodes = getVisibleNodes(data);
 
+  // 只渲染所属节点当前可见的便签（折叠隐藏节点的便签不显示）
+  const visibleNodeIdSet = new Set(visibleNodes.map((n) => n.id));
+  const visibleCards = (data.cards ?? []).filter((c) => visibleNodeIdSet.has(c.nodeId));
+
+  // 便签及其所属节点的布局信息：渲染便签和从属连线共用，保证节点拖拽、便签拖拽、布局重算时同步跟随
+  const visibleCardLayouts = visibleCards.flatMap((card) => {
+    const node = data.nodes[card.nodeId];
+    if (!node || node.x === undefined || node.y === undefined) return [];
+    // 节点拖拽中便签跟随节点一起移动；便签自身拖拽时用本地预览偏移
+    const nodeOffsetX = dragging?.nodeId === card.nodeId ? dragging.offsetX : 0;
+    const nodeOffsetY = dragging?.nodeId === card.nodeId ? dragging.offsetY : 0;
+    const preview = cardDrag?.id === card.id ? cardDrag : null;
+    return [{
+      card,
+      nodeX: node.x + nodeOffsetX,
+      nodeY: node.y + nodeOffsetY,
+      nodeW: node.width ?? 120,
+      nodeH: node.height ?? 40,
+      left: node.x + nodeOffsetX + (preview ? preview.dx : card.dx),
+      top: node.y + nodeOffsetY + (preview ? preview.dy : card.dy),
+    }];
+  });
+
   // 根据节点内容动态扩展画布尺寸，至少保留 2000×2000 的基础空间
   const canvasSize = useMemo(() => {
     const bounds = data.canvasBounds;
@@ -439,6 +565,7 @@ ref: React.ForwardedRef<MindMapCanvasRef>
       { label: '编辑', shortcut: 'Enter', onClick: () => onStartEdit(id) },
       { label: '添加子主题', shortcut: 'Tab/Insert', onClick: () => onAddChild(id) },
       { label: '添加同级主题', shortcut: 'Ctrl+Enter', disabled: isRoot, onClick: () => onAddSibling(id) },
+      { label: '添加便签', onClick: () => handleAddCard(id) },
       { divider: true, label: '', onClick: () => {} },
       { label: '复制', shortcut: 'Ctrl+C', disabled: isRoot, onClick: () => onCopy(id) },
       { label: '剪切', shortcut: 'Ctrl+X', disabled: isRoot, onClick: () => onCut(id) },
@@ -519,6 +646,7 @@ ref: React.ForwardedRef<MindMapCanvasRef>
         >
           {renderConnections(data, visibleNodes, connectionStyle, data.layout ?? 'balanced')}
           {renderRelations(data, visibleNodes)}
+          {renderStickyLinks(visibleCardLayouts, hoveredCardId)}
         </svg>
           {visibleNodes.map((node) => (
           <NodeView
@@ -538,6 +666,23 @@ ref: React.ForwardedRef<MindMapCanvasRef>
             onMouseDown={handleNodeMouseDown}
             onMouseMove={handleNodeMouseMove}
             onMouseUp={handleNodeMouseUp}
+          />
+        ))}
+        {visibleCardLayouts.map(({ card, left, top }) => (
+          <StickyNoteView
+            key={card.id}
+            card={card}
+            left={left}
+            top={top}
+            editing={editingCardId === card.id}
+            dragging={cardDrag?.id === card.id}
+            suppressClickRef={suppressCardClickRef}
+            onMouseDown={handleCardMouseDown}
+            onStartEdit={setEditingCardId}
+            onCommitEdit={commitCardEdit}
+            onDelete={onDeleteCards}
+            onCycleColor={cycleCardColor}
+            onHoverChange={setHoveredCardId}
           />
         ))}
         {boxSelect && (
@@ -791,8 +936,197 @@ function NodeView({
   );
 }
 
-function renderConnections(
-  data: MindMapData,
+/** 节点附属便签：位置 = 所属节点坐标 + 相对偏移，跟随画布缩放/平移 */
+function StickyNoteView({
+  card,
+  left,
+  top,
+  editing,
+  dragging,
+  suppressClickRef,
+  onMouseDown,
+  onStartEdit,
+  onCommitEdit,
+  onDelete,
+  onCycleColor,
+  onHoverChange,
+}: {
+  card: StickyCard;
+  left: number;
+  top: number;
+  editing: boolean;
+  dragging: boolean;
+  suppressClickRef: React.MutableRefObject<boolean>;
+  onMouseDown: (card: StickyCard, e: React.MouseEvent) => void;
+  onStartEdit: (id: string) => void;
+  onCommitEdit: (id: string, text: string) => void;
+  onDelete: (ids: string[]) => void;
+  onCycleColor: (card: StickyCard) => void;
+  onHoverChange: (id: string | null) => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editValueRef = useRef(card.text);
+  // 进入编辑时的原文本，Esc 取消时恢复（新建空便签因此提交空文本被删除）
+  const originalTextRef = useRef(card.text);
+  const lastClickRef = useRef(0);
+
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      originalTextRef.current = card.text;
+      editValueRef.current = card.text;
+      textareaRef.current.focus();
+      textareaRef.current.select();
+    }
+    return () => {
+      // 编辑状态被卸载（例如撤销删除便签）时兜底提交，通过 ref 保存而不是依赖 onBlur。
+      // 仅在内容确实被修改过时提交：StrictMode 会重复挂载/卸载 effect，
+      // 无条件提交会把刚新建的空便签当作“空文本提交”误删。
+      if (editing && editValueRef.current !== originalTextRef.current) {
+        onCommitEdit(card.id, editValueRef.current);
+      }
+    };
+  }, [editing, card.id, card.text, onCommitEdit]);
+
+  // 单击选中/拖拽，双击进入编辑（click 时间戳双击检测，同节点交互）
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (editing) return;
+    const now = Date.now();
+    if (now - lastClickRef.current < CARD_DBL_CLICK_INTERVAL) {
+      lastClickRef.current = 0;
+      onStartEdit(card.id);
+      return;
+    }
+    lastClickRef.current = now;
+  };
+
+  return (
+    <div
+      className={['sticky-card', editing ? 'editing' : '', dragging ? 'dragging' : ''].join(' ')}
+      style={{ left, top, background: card.color || DEFAULT_CARD_COLOR }}
+      data-card-id={card.id}
+      onMouseDown={(e) => onMouseDown(card, e)}
+      onClick={handleClick}
+      onMouseEnter={() => onHoverChange(card.id)}
+      onMouseLeave={() => onHoverChange(null)}
+      onContextMenu={(e) => {
+        // 便签上不弹浏览器默认菜单，也不冒泡到节点右键菜单
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      {editing ? (
+        <textarea
+          ref={textareaRef}
+          className="sticky-card-textarea"
+          defaultValue={card.text}
+          onChange={(e) => {
+            editValueRef.current = e.target.value;
+          }}
+          onBlur={() => onCommitEdit(card.id, editValueRef.current)}
+          onKeyDown={(e) => {
+            // 阻止冒泡：编辑时不触发画布的节点快捷键
+            e.stopPropagation();
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              // 先 blur 确保 onBlur 触发提交；cleanup 中会再次提交，但为幂等调用
+              e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              editValueRef.current = originalTextRef.current;
+              e.currentTarget.blur();
+            }
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <>
+          <div className="sticky-card-text">{card.text || ' '}</div>
+          <button
+            className="sticky-card-close"
+            title="删除便签"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete([card.id]);
+            }}
+          >
+            ×
+          </button>
+          <button
+            className="sticky-card-swatch"
+            style={{ background: card.color || DEFAULT_CARD_COLOR }}
+            title="切换颜色"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCycleColor(card);
+            }}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 便签从属连线的布局信息（与渲染便签共用同一份计算结果） */
+interface StickyLinkLayout {
+  card: StickyCard;
+  nodeX: number;
+  nodeY: number;
+  nodeW: number;
+  nodeH: number;
+  left: number;
+  top: number;
+}
+
+/** 中心指向目标的连线与矩形边缘的交点（连线锚点） */
+function edgeAnchor(
+  rect: { cx: number; cy: number; hw: number; hh: number },
+  towardX: number,
+  towardY: number
+) {
+  const dx = towardX - rect.cx;
+  const dy = towardY - rect.cy;
+  if (dx === 0 && dy === 0) return { x: rect.cx, y: rect.cy };
+  const t = Math.min(
+    dx !== 0 ? rect.hw / Math.abs(dx) : Infinity,
+    dy !== 0 ? rect.hh / Math.abs(dy) : Infinity
+  );
+  return { x: rect.cx + dx * t, y: rect.cy + dy * t };
+}
+
+/** 绘制便签与所属节点之间的从属连线：细虚线、低对比灰色，与节点间连线区分 */
+function renderStickyLinks(layouts: StickyLinkLayout[], hoveredCardId: string | null) {
+  if (layouts.length === 0) return null;
+  return layouts.map(({ card, nodeX, nodeY, nodeW, nodeH, left, top }) => {
+    // 起止点取“节点中心 → 便签中心”连线与各自边缘的交点；
+    // 便签实际高度随文本变化，这里按最小高度近似，多出的线头会被卡片遮住
+    const nodeRect = { cx: nodeX + nodeW / 2, cy: nodeY + nodeH / 2, hw: nodeW / 2, hh: nodeH / 2 };
+    const cardRect = { cx: left + STICKY_WIDTH / 2, cy: top + STICKY_MIN_HEIGHT / 2, hw: STICKY_WIDTH / 2, hh: STICKY_MIN_HEIGHT / 2 };
+    const start = edgeAnchor(nodeRect, cardRect.cx, cardRect.cy);
+    const end = edgeAnchor(cardRect, nodeRect.cx, nodeRect.cy);
+    return (
+      <line
+        key={card.id}
+        className={`sticky-link${hoveredCardId === card.id ? ' hovered' : ''}`}
+        data-card-id={card.id}
+        x1={start.x}
+        y1={start.y}
+        x2={end.x}
+        y2={end.y}
+        strokeWidth={1}
+        strokeDasharray="4,4"
+      />
+    );
+  });
+}
+
+function renderConnections(  data: MindMapData,
   visibleNodes: MindNode[],
   connectionStyle: 'bezier' | 'straight' | 'orthogonal' | 'rounded',
   layout: string
