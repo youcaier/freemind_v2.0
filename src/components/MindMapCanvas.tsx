@@ -31,8 +31,7 @@ interface MindMapCanvasProps {
   onCopy: (id: string) => void;
   onCut: (id: string) => void;
   onPaste: (parentId: string) => void;
-  onMoveNode: (nodeId: string, targetParentId: string) => void;
-  onReorderNode: (nodeId: string, insertBeforeSiblingId: string | null) => void;
+  onSetNodeOffset: (id: string, offsetX: number, offsetY: number) => void;
   onChangeStyle: (id: string, patch: Partial<Pick<MindNode, 'style' | 'icon' | 'tags' | 'priority' | 'progress' | 'note' | 'hyperlink'>>) => void;
   clipboard: { nodes: Record<string, MindNode>; rootId: string } | null;
   onUndo: () => void;
@@ -73,8 +72,7 @@ export const MindMapCanvas = forwardRef<MindMapCanvasRef, MindMapCanvasProps>(fu
   onCopy,
   onCut,
   onPaste,
-  onMoveNode,
-  onReorderNode,
+  onSetNodeOffset,
   onChangeStyle,
   clipboard,
   onUndo,
@@ -105,7 +103,6 @@ ref: React.ForwardedRef<MindMapCanvasRef>
     pointerOffsetX: number;
     pointerOffsetY: number;
   } | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showMinimap, setShowMinimap] = useState(true);
   const dragRef = useRef(dragging);
   dragRef.current = dragging;
@@ -331,14 +328,12 @@ ref: React.ForwardedRef<MindMapCanvasRef>
     e.stopPropagation();
 
     // 选择逻辑交给 click 事件处理，避免 mousedown 中立即重渲染破坏双击事件。
-    // 这里只记录拖拽起点。
-    if (nodeId !== data.rootId) {
-      const node = data.nodes[nodeId];
-      const { x, y } = toCanvas(e.clientX, e.clientY);
-      const pointerOffsetX = node && node.x !== undefined ? x - node.x : 0;
-      const pointerOffsetY = node && node.y !== undefined ? y - node.y : 0;
-      dragStartRef.current = { nodeId, startX: x, startY: y, pointerOffsetX, pointerOffsetY };
-    }
+    // 这里只记录拖拽起点（自由布局：根节点也可拖动）。
+    const node = data.nodes[nodeId];
+    const { x, y } = toCanvas(e.clientX, e.clientY);
+    const pointerOffsetX = node && node.x !== undefined ? x - node.x : 0;
+    const pointerOffsetY = node && node.y !== undefined ? y - node.y : 0;
+    dragStartRef.current = { nodeId, startX: x, startY: y, pointerOffsetX, pointerOffsetY };
   };
 
   const handleNodeMouseMove = (nodeId: string, e: React.MouseEvent) => {
@@ -429,19 +424,11 @@ ref: React.ForwardedRef<MindMapCanvasRef>
     if (!dragRef.current || !containerRef.current) return;
     const node = data.nodes[dragRef.current.nodeId];
     if (!node || node.x === undefined || node.y === undefined) return;
+    // 自由拖拽：只更新本地预览偏移（增量已是画布坐标，toCanvas 处理了 scale），松手才提交
     const { x, y } = toCanvas(e.clientX, e.clientY);
     const offsetX = x - node.x - dragRef.current.pointerOffsetX;
     const offsetY = y - node.y - dragRef.current.pointerOffsetY;
     setDragging({ ...dragRef.current, offsetX, offsetY });
-
-    const target = findNodeAtCenter(
-      data,
-      visibleNodes,
-      x,
-      y,
-      dragRef.current.nodeId
-    );
-    setDropTarget(target);
   };
 
   const handleMouseUp = () => {
@@ -482,42 +469,47 @@ ref: React.ForwardedRef<MindMapCanvasRef>
     }
     if (!dragRef.current || !containerRef.current) {
       setDragging(null);
-      setDropTarget(null);
       dragStartRef.current = null;
       return;
     }
+    // 自由拖拽松手：把拖拽增量累加到节点手动偏移上，一次性提交（单步进历史栈）
     const { nodeId, offsetX, offsetY } = dragRef.current;
     const node = data.nodes[nodeId];
-    if (node && node.x !== undefined && node.y !== undefined) {
-      const finalX = node.x + offsetX + (node.width ?? 120) / 2;
-      const finalY = node.y + offsetY + (node.height ?? 40) / 2;
-      const targetId = findNodeAtCenter(
-        data,
-        visibleNodes,
-        finalX,
-        finalY,
-        nodeId
+    if (node) {
+      onSetNodeOffset(
+        nodeId,
+        Math.round((node.offsetX ?? 0) + offsetX),
+        Math.round((node.offsetY ?? 0) + offsetY)
       );
-      if (targetId && targetId !== data.rootId) {
-        onMoveNode(nodeId, targetId);
-      } else if (node.parentId) {
-        const insertBefore = findInsertBeforeSibling(
-          data,
-          node.parentId,
-          nodeId,
-          finalY
-        );
-        onReorderNode(nodeId, insertBefore);
-      }
     }
     // 拖拽结束后确保被拖拽节点保持选中
     onSelect(nodeId, 'replace');
     setDragging(null);
-    setDropTarget(null);
     dragStartRef.current = null;
   };
 
   const visibleNodes = getVisibleNodes(data);
+
+  // 自由拖拽预览：把被拖节点及其所有后代的坐标临时叠加拖拽增量，
+  // 节点、连线、便签统一消费这份预览数据，松手后才提交到数据层
+  let renderData = data;
+  if (dragging) {
+    const followIds = new Set<string>();
+    const collect = (id: string) => {
+      followIds.add(id);
+      data.nodes[id]?.children.forEach(collect);
+    };
+    collect(dragging.nodeId);
+    const nodes = { ...data.nodes };
+    followIds.forEach((id) => {
+      const n = nodes[id];
+      if (n && n.x !== undefined && n.y !== undefined) {
+        nodes[id] = { ...n, x: n.x + dragging.offsetX, y: n.y + dragging.offsetY };
+      }
+    });
+    renderData = { ...data, nodes };
+  }
+  const renderNodes = getVisibleNodes(renderData);
 
   // 只渲染所属节点当前可见的便签（折叠隐藏节点的便签不显示）
   const visibleNodeIdSet = new Set(visibleNodes.map((n) => n.id));
@@ -525,20 +517,18 @@ ref: React.ForwardedRef<MindMapCanvasRef>
 
   // 便签及其所属节点的布局信息：渲染便签和从属连线共用，保证节点拖拽、便签拖拽、布局重算时同步跟随
   const visibleCardLayouts = visibleCards.flatMap((card) => {
-    const node = data.nodes[card.nodeId];
+    const node = renderData.nodes[card.nodeId];
     if (!node || node.x === undefined || node.y === undefined) return [];
-    // 节点拖拽中便签跟随节点一起移动；便签自身拖拽时用本地预览偏移
-    const nodeOffsetX = dragging?.nodeId === card.nodeId ? dragging.offsetX : 0;
-    const nodeOffsetY = dragging?.nodeId === card.nodeId ? dragging.offsetY : 0;
+    // 便签自身拖拽时用本地预览偏移（节点拖拽跟随已由 renderData 覆盖）
     const preview = cardDrag?.id === card.id ? cardDrag : null;
     return [{
       card,
-      nodeX: node.x + nodeOffsetX,
-      nodeY: node.y + nodeOffsetY,
+      nodeX: node.x,
+      nodeY: node.y,
       nodeW: node.width ?? 120,
       nodeH: node.height ?? 40,
-      left: node.x + nodeOffsetX + (preview ? preview.dx : card.dx),
-      top: node.y + nodeOffsetY + (preview ? preview.dy : card.dy),
+      left: node.x + (preview ? preview.dx : card.dx),
+      top: node.y + (preview ? preview.dy : card.dy),
     }];
   });
 
@@ -644,11 +634,11 @@ ref: React.ForwardedRef<MindMapCanvasRef>
             overflow: 'visible',
           }}
         >
-          {renderConnections(data, visibleNodes, connectionStyle, data.layout ?? 'balanced')}
-          {renderRelations(data, visibleNodes)}
+          {renderConnections(renderData, renderNodes, connectionStyle, data.layout ?? 'balanced')}
+          {renderRelations(renderData, renderNodes)}
           {renderStickyLinks(visibleCardLayouts, hoveredCardId)}
         </svg>
-          {visibleNodes.map((node) => (
+          {renderNodes.map((node) => (
           <NodeView
             key={node.id}
             node={node}
@@ -656,9 +646,6 @@ ref: React.ForwardedRef<MindMapCanvasRef>
             editing={editingId === node.id}
             highlighted={highlightedIds.includes(node.id)}
             dragging={dragging?.nodeId === node.id}
-            offsetX={dragging?.nodeId === node.id ? dragging.offsetX : 0}
-            offsetY={dragging?.nodeId === node.id ? dragging.offsetY : 0}
-            dropTarget={dropTarget === node.id}
             onSelect={onSelect}
             onStartEdit={onStartEdit}
             onCommitEdit={onCommitEdit}
@@ -741,9 +728,6 @@ function NodeView({
   editing,
   highlighted,
   dragging,
-  offsetX,
-  offsetY,
-  dropTarget,
   onSelect,
   onStartEdit,
   onCommitEdit,
@@ -757,9 +741,6 @@ function NodeView({
   editing: boolean;
   highlighted: boolean;
   dragging: boolean;
-  offsetX: number;
-  offsetY: number;
-  dropTarget: boolean;
   onSelect: (id: string) => void;
   onStartEdit: (id: string) => void;
   onCommitEdit: (id: string, label: string) => void;
@@ -788,8 +769,9 @@ function NodeView({
     };
   }, [editing, node.id, node.label, onCommitEdit]);
 
-  const left = (node.x ?? 0) + (dragging ? offsetX : 0);
-  const top = (node.y ?? 0) + (dragging ? offsetY : 0);
+  // node.x/y 已是有效位置（自动布局 + 手动偏移），拖拽预览由上层 renderData 统一叠加
+  const left = node.x ?? 0;
+  const top = node.y ?? 0;
   const width = node.width ?? 120;
   const height = node.height ?? 40;
 
@@ -800,8 +782,6 @@ function NodeView({
       ? selectedBorder
       : highlighted
       ? highlightedBorder
-      : dropTarget
-      ? `2px dashed var(--accent-color)`
       : `1px solid ${borderColor}`;
 
     const background = node.style?.background ?? 'var(--node-bg)';
@@ -1498,45 +1478,6 @@ function getVisibleNodes(data: MindMapData): MindNode[] {
     });
   }
   return result;
-}
-
-function findNodeAtCenter(
-  _data: MindMapData,
-  visibleNodes: MindNode[],
-  x: number,
-  y: number,
-  excludeId: string
-): string | null {
-  for (const node of visibleNodes) {
-    if (node.id === excludeId) continue;
-    const cx = (node.x ?? 0) + (node.width ?? 120) / 2;
-    const cy = (node.y ?? 0) + (node.height ?? 40) / 2;
-    const rx = (node.width ?? 120) / 2;
-    const ry = (node.height ?? 40) / 2;
-    if (x >= cx - rx && x <= cx + rx && y >= cy - ry && y <= cy + ry) {
-      return node.id;
-    }
-  }
-  return null;
-}
-
-function findInsertBeforeSibling(
-  data: MindMapData,
-  parentId: string,
-  nodeId: string,
-  y: number
-): string | null {
-  const parent = data.nodes[parentId];
-  if (!parent) return null;
-  const siblings = parent.children.filter((id) => id !== nodeId);
-  for (const siblingId of siblings) {
-    const sibling = data.nodes[siblingId];
-    if (!sibling || sibling.y === undefined) continue;
-    if (y < sibling.y + (sibling.height ?? 40) / 2) {
-      return siblingId;
-    }
-  }
-  return null;
 }
 
 interface MinimapProps {

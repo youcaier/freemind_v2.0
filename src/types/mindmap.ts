@@ -14,6 +14,9 @@ export interface MindNode {
   hyperlink?: string;
   x?: number;
   y?: number;
+  /** 相对自动布局位置的手动偏移（默认 0）；节点有效位置会累加所有祖先的偏移 */
+  offsetX?: number;
+  offsetY?: number;
   width?: number;
   height?: number;
   parentId?: NodeID;

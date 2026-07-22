@@ -282,6 +282,37 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
     });
   }, []);
 
+  // 设置节点的手动偏移并重新布局（自由拖拽松手提交，单步进历史栈）
+  const setNodeOffset = useCallback((id: NodeID, offsetX: number, offsetY: number) => {
+    setData((prev) => {
+      const target = prev.nodes[id];
+      if (!target) return prev;
+      if ((target.offsetX ?? 0) === offsetX && (target.offsetY ?? 0) === offsetY) return prev;
+      const next: MindMapData = {
+        ...prev,
+        nodes: { ...prev.nodes, [id]: { ...target, offsetX, offsetY } },
+      };
+      return calculateTreeLayout(next);
+    });
+  }, []);
+
+  // 清空所有节点的手动偏移，回到纯自动布局（可撤销）
+  const resetOffsets = useCallback(() => {
+    setData((prev) => {
+      if (!Object.values(prev.nodes).some((n) => (n.offsetX ?? 0) !== 0 || (n.offsetY ?? 0) !== 0)) return prev;
+      const nodes: Record<NodeID, MindNode> = {};
+      Object.values(prev.nodes).forEach((n) => {
+        nodes[n.id] = { ...n, offsetX: 0, offsetY: 0 };
+      });
+      return calculateTreeLayout({ ...prev, nodes });
+    });
+  }, []);
+
+  // 重新执行自动布局（保留所有手动偏移）
+  const relayout = useCallback(() => {
+    setData((prev) => calculateTreeLayout({ ...prev }));
+  }, []);
+
   // 撤销/重做
   const undo = useCallback(() => {
     if (!canUndo) return;
@@ -459,6 +490,9 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
     pasteNode,
     moveNode,
     reorderNode,
+    setNodeOffset,
+    resetOffsets,
+    relayout,
     selectedIds,
     selectNodes,
     clipboard,

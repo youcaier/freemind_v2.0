@@ -279,7 +279,26 @@ export function findNodeAt(data: MindMapData, x: number, y: number): MindNode | 
 }
 
 export function calculateTreeLayout(data: MindMapData): MindMapData {
-  return newCalculateLayout(data);
+  const next = newCalculateLayout(data);
+  applyNodeOffsets(next);
+  return next;
+}
+
+// 手动偏移：节点有效位置 = 自动布局位置 + 自身偏移 + 所有祖先偏移累加。
+// 布局完成后 DFS 写回 x/y（写时复制，不污染历史快照），
+// 因此连线、便签锚定、框选、键盘导航等下游消费的 x/y 都是有效位置。
+function applyNodeOffsets(data: MindMapData): void {
+  const visit = (id: NodeID, baseX: number, baseY: number) => {
+    const node = data.nodes[id];
+    if (!node) return;
+    const accX = baseX + (node.offsetX ?? 0);
+    const accY = baseY + (node.offsetY ?? 0);
+    if (accX !== 0 || accY !== 0) {
+      data.nodes[id] = { ...node, x: (node.x ?? 0) + accX, y: (node.y ?? 0) + accY };
+    }
+    node.children.forEach((childId) => visit(childId, accX, accY));
+  };
+  visit(data.rootId, 0, 0);
 }
 
 export function calculateBalancedTreeLayout(data: MindMapData): MindMapData {
