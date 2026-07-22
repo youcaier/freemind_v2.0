@@ -1,5 +1,5 @@
 import type { WorkingNode, Theme } from '../index';
-import { measureNode } from '../index';
+import { measureNode, shiftSubtree } from '../index';
 
 interface LayoutBox {
   x: number;
@@ -93,13 +93,5 @@ function layoutTimelineNode(node: WorkingNode, startX: number, startY: number, t
       totalHeight: node.bbox.height,
       totalWidth: node.bbox.width + theme.levelGap + totalWidth,
     };
-  }
-}
-
-function shiftSubtree(node: WorkingNode, dx: number, dy: number): void {
-  node.bbox.x += dx;
-  node.bbox.y += dy;
-  if (!node.collapsed) {
-    node.children.forEach((child) => shiftSubtree(child, dx, dy));
   }
 }

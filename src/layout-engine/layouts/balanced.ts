@@ -1,5 +1,5 @@
 import type { WorkingNode, Theme } from '../index';
-import { measureNode } from '../index';
+import { measureNode, shiftSubtree } from '../index';
 
 interface LayoutBox {
   x: number;
@@ -161,25 +161,4 @@ function layoutDirectionalSubtree(
     totalHeight: height,
     totalWidth,
   };
-}
-
-function shiftSubtree(node: WorkingNode, dx: number, dy: number): void {
-  node.bbox.x += dx;
-  node.bbox.y += dy;
-  if (!node.collapsed) {
-    node.children.forEach((child) => shiftSubtree(child, dx, dy));
-  }
-}
-
-/** 获取子树宽度（内部按所在方向展开） */
-export function subtreeWidth(node: WorkingNode, theme: Theme): number {
-  if (node.collapsed || node.children.length === 0) return node.bbox.width;
-  return node.bbox.width + theme.levelGap + Math.max(...node.children.map((c) => subtreeWidth(c, theme)));
-}
-
-/** 获取子树高度 */
-export function subtreeHeight(node: WorkingNode, theme: Theme): number {
-  if (node.collapsed || node.children.length === 0) return node.bbox.height;
-  const total = node.children.reduce((sum, c) => sum + subtreeHeight(c, theme), 0) + (node.children.length - 1) * theme.siblingGap;
-  return Math.max(node.bbox.height, total);
 }

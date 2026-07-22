@@ -11,6 +11,7 @@ import {
   addSiblingNode as addSiblingNodeEngine,
   removeNode,
   calculateTreeLayout,
+  recomputeCanvasBounds,
   cloneSubtree,
   insertSubtree,
   findNextSibling,
@@ -115,7 +116,11 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
           },
         },
       };
-      return calculateTreeLayout(next);
+      // 只有影响节点测量的字段（宽高/字号）才需要重排，其余装饰性修改走轻路径
+      const affectsMeasurement = !!patch.style && (
+        patch.style.width !== undefined || patch.style.height !== undefined || patch.style.fontSize !== undefined
+      );
+      return affectsMeasurement ? calculateTreeLayout(next) : next;
     });
   }, []);
 
@@ -282,17 +287,28 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
     });
   }, []);
 
-  // 设置节点的手动偏移并重新布局（自由拖拽松手提交，单步进历史栈）
+  // 设置节点的手动偏移（自由拖拽松手提交，单步进历史栈）。
+  // x/y 存的是有效位置（基础坐标 + 累计偏移），因此只需把偏移变化量平移到整个子树，
+  // 无需重跑测量+布局；切勿改成重算偏移，否则偏移会被重复累加。
   const setNodeOffset = useCallback((id: NodeID, offsetX: number, offsetY: number) => {
     setData((prev) => {
       const target = prev.nodes[id];
       if (!target) return prev;
-      if ((target.offsetX ?? 0) === offsetX && (target.offsetY ?? 0) === offsetY) return prev;
-      const next: MindMapData = {
-        ...prev,
-        nodes: { ...prev.nodes, [id]: { ...target, offsetX, offsetY } },
+      const dX = offsetX - (target.offsetX ?? 0);
+      const dY = offsetY - (target.offsetY ?? 0);
+      if (dX === 0 && dY === 0) return prev;
+      const next: MindMapData = { ...prev, nodes: { ...prev.nodes } };
+      const shift = (nid: NodeID) => {
+        const n = next.nodes[nid];
+        if (!n) return;
+        next.nodes[nid] = nid === id
+          ? { ...n, offsetX, offsetY, x: (n.x ?? 0) + dX, y: (n.y ?? 0) + dY }
+          : { ...n, x: (n.x ?? 0) + dX, y: (n.y ?? 0) + dY };
+        n.children.forEach(shift);
       };
-      return calculateTreeLayout(next);
+      shift(id);
+      recomputeCanvasBounds(next);
+      return next;
     });
   }, []);
 
@@ -384,15 +400,16 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
   }, []);
 
   const changeConnectionStyle = useCallback((connectionStyle: MindMapData['connectionStyle']) => {
-    setData((prev) => calculateTreeLayout({ ...prev, connectionStyle }));
+    // 连线样式只影响绘制，不参与测量与布局，跳过重排
+    setData((prev) => ({ ...prev, connectionStyle }));
   }, []);
 
   const changeConnectionColor = useCallback((connectionColor: string) => {
-    setData((prev) => calculateTreeLayout({ ...prev, connectionColor }));
+    setData((prev) => ({ ...prev, connectionColor }));
   }, []);
 
   const changeConnectionWidth = useCallback((connectionWidth: number) => {
-    setData((prev) => calculateTreeLayout({ ...prev, connectionWidth }));
+    setData((prev) => ({ ...prev, connectionWidth }));
   }, []);
 
   // ---------- 节点附属便签操作 ----------
@@ -458,15 +475,16 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
         color: '#FF6B6B',
         style: 'dashed',
       };
+      // 关系线不参与布局，跳过重排
       const relations = [...(prev.relations ?? []), relation];
-      return calculateTreeLayout({ ...prev, relations });
+      return { ...prev, relations };
     });
   }, []);
 
   const removeRelation = useCallback((relationId: string) => {
     setData((prev) => {
       const relations = (prev.relations ?? []).filter((r) => r.id !== relationId);
-      return calculateTreeLayout({ ...prev, relations });
+      return { ...prev, relations };
     });
   }, []);
 

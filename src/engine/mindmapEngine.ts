@@ -299,6 +299,29 @@ function applyNodeOffsets(data: MindMapData): void {
     node.children.forEach((childId) => visit(childId, accX, accY));
   };
   visit(data.rootId, 0, 0);
+  recomputeCanvasBounds(data);
+}
+
+// 根据节点当前坐标（有效位置）重算画布边界。
+// 布局写回的 canvasBounds 是偏移前的自动布局边界，节点被拖出该范围后需要包含新位置；
+// 折叠子树不参与，与布局写回时口径一致。
+export function recomputeCanvasBounds(data: MindMapData): void {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const visit = (id: NodeID) => {
+    const node = data.nodes[id];
+    if (!node || node.x === undefined || node.y === undefined) return;
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x + (node.width ?? 0));
+    maxY = Math.max(maxY, node.y + (node.height ?? 0));
+    if (!node.collapsed) node.children.forEach(visit);
+  };
+  visit(data.rootId);
+  if (minX === Infinity) return;
+  data.canvasBounds = { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }
 
 export function calculateBalancedTreeLayout(data: MindMapData): MindMapData {

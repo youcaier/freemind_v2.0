@@ -1,7 +1,6 @@
-import type { WorkingNode, Theme, LayoutResult } from './index';
+import type { WorkingNode, Theme } from './index';
 import {
   convertToLayoutTree,
-  toLayoutResult,
   computeCanvasBounds,
   getLayoutStyles,
 } from './index';
@@ -29,13 +28,6 @@ export function calculateLayout(data: MindMapData, startX = 0, startY = 0): Mind
   applyComputedStyles(next, root);
 
   return next;
-}
-
-export function toLayoutResultFromData(data: MindMapData, startX = 0, startY = 0): LayoutResult {
-  const theme = toTheme(data.layout, data.connectionStyle);
-  const root = convertToLayoutTree(data.rootId, data.nodes, undefined, 0, 0);
-  runLayout(root, data.layout, startX, startY, theme);
-  return toLayoutResult(root, theme);
 }
 
 function runLayout(
@@ -120,22 +112,13 @@ function applyComputedStyles(data: MindMapData, root: WorkingNode): void {
   });
 }
 
-/** 将 MindMapLayout + ConnectionStyle 映射为 Theme */
-export function toTheme(layout: MindMapLayout | undefined, connectionStyle: ConnectionStyle | undefined): Theme {
-  const map: Record<MindMapLayout, Theme['direction']> = {
-    balanced: 'radial',
-    fishbone: 'right',
-    timeline: 'bottom',
-    org: 'bottom',
-    leftTree: 'left',
-    rightTree: 'right',
-  };
+/** 将 ConnectionStyle 映射为 Theme（连线样式只影响绘制，不影响布局；layout 参数保留以兼容调用方） */
+export function toTheme(_layout: MindMapLayout | undefined, connectionStyle: ConnectionStyle | undefined): Theme {
   return {
     siblingGap: 24,
     levelGap: 80,
     paddingX: 16,
     paddingY: 10,
     lineStyle: (connectionStyle === 'orthogonal' || connectionStyle === 'rounded') ? 'polyline' : (connectionStyle ?? 'bezier'),
-    direction: map[layout ?? 'balanced'],
   };
 }

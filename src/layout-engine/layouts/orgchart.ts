@@ -1,5 +1,5 @@
 import type { WorkingNode, Theme } from '../index';
-import { measureNode } from '../index';
+import { measureNode, shiftSubtree } from '../index';
 
 interface LayoutBox {
   x: number;
@@ -60,25 +60,4 @@ function layoutNodeDown(node: WorkingNode, startX: number, startY: number, theme
     totalHeight: node.bbox.height + theme.levelGap + Math.max(...childBoxes.map((cb) => cb.box.totalHeight)),
     totalWidth: Math.max(node.bbox.width, totalChildrenWidth),
   };
-}
-
-function shiftSubtree(node: WorkingNode, dx: number, dy: number): void {
-  node.bbox.x += dx;
-  node.bbox.y += dy;
-  if (!node.collapsed) {
-    node.children.forEach((child) => shiftSubtree(child, dx, dy));
-  }
-}
-
-/** 获取子树的总宽度 */
-export function subtreeWidth(node: WorkingNode, theme: Theme): number {
-  if (node.collapsed || node.children.length === 0) return node.bbox.width;
-  const childrenWidth = node.children.reduce((sum, c) => sum + subtreeWidth(c, theme), 0) + (node.children.length - 1) * theme.siblingGap;
-  return Math.max(node.bbox.width, childrenWidth);
-}
-
-/** 获取子树的总高度 */
-export function subtreeHeight(node: WorkingNode, theme: Theme): number {
-  if (node.collapsed || node.children.length === 0) return node.bbox.height;
-  return node.bbox.height + theme.levelGap + Math.max(...node.children.map((c) => subtreeHeight(c, theme)));
 }

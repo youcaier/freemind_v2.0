@@ -1,4 +1,4 @@
-import type { NodeID, MindNode, NodeStyle, MindMapLayout, ConnectionStyle } from '@/types/mindmap';
+import type { NodeID, MindNode, NodeStyle } from '@/types/mindmap';
 
 /** 布局引擎统一主题配置 */
 export interface Theme {
@@ -7,7 +7,6 @@ export interface Theme {
   paddingX: number;
   paddingY: number;
   lineStyle: 'bezier' | 'polyline' | 'straight';
-  direction: 'right' | 'left' | 'top' | 'bottom' | 'radial';
 }
 
 /** 单个节点边界框 */
@@ -74,7 +73,6 @@ export const DEFAULT_THEME: Theme = {
   paddingX: 16,
   paddingY: 10,
   lineStyle: 'bezier',
-  direction: 'right',
 };
 
 /** 层级样式（文档 7.1） */
@@ -148,16 +146,6 @@ export function measureNode(node: WorkingNode, theme: Theme): void {
   }
 }
 
-/** 重新向上回溯测量尺寸 */
-export function reMeasureUpward(node: WorkingNode, theme: Theme): void {
-  measureNode(node, theme);
-  let current: WorkingNode | undefined = node.parent;
-  while (current) {
-    measureNode(current, theme);
-    current = current.parent;
-  }
-}
-
 /** 计算所有节点的边界 */
 export function computeCanvasBounds(roots: WorkingNode[]): LayoutResult['canvasBounds'] {
   let minX = Infinity;
@@ -189,122 +177,13 @@ export function computeCanvasBounds(roots: WorkingNode[]): LayoutResult['canvasB
   };
 }
 
-/** 把工作节点转换回布局结果 */
-export function toLayoutResult(root: WorkingNode, theme: Theme): LayoutResult {
-  const nodes: LayoutResult['nodes'] = [];
-  const edges: LayoutResult['edges'] = [];
-
-  const visit = (node: WorkingNode) => {
-    nodes.push({
-      id: node.id,
-      x: node.bbox.x,
-      y: node.bbox.y,
-      width: node.bbox.width,
-      height: node.bbox.height,
-      level: node.level,
-      branchIndex: node.branchIndex,
-    });
-    if (!node.collapsed) {
-      node.children.forEach((child) => {
-        edges.push({
-          from: node.id,
-          to: child.id,
-          path: buildEdgePath(node.bbox, child.bbox, theme),
-        });
-        visit(child);
-      });
-    }
-  };
-  visit(root);
-
-  return {
-    nodes,
-    edges,
-    canvasBounds: computeCanvasBounds([root]),
-  };
-}
-
-/** 计算锚点 */
-export function getAnchor(
-  bbox: BBox,
-  direction: 'right' | 'left' | 'top' | 'bottom'
-): { x: number; y: number } {
-  switch (direction) {
-    case 'right':
-      return { x: bbox.x + bbox.width, y: bbox.y + bbox.height / 2 };
-    case 'left':
-      return { x: bbox.x, y: bbox.y + bbox.height / 2 };
-    case 'bottom':
-      return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height };
-    case 'top':
-      return { x: bbox.x + bbox.width / 2, y: bbox.y };
+/** 整体平移子树（各布局共用） */
+export function shiftSubtree(node: WorkingNode, dx: number, dy: number): void {
+  node.bbox.x += dx;
+  node.bbox.y += dy;
+  if (!node.collapsed) {
+    node.children.forEach((child) => shiftSubtree(child, dx, dy));
   }
-}
-
-/** 构建连线路径 */
-export function buildEdgePath(
-  parentBBox: BBox,
-  childBBox: BBox,
-  theme: Theme
-): string {
-  const direction = inferDirection(parentBBox, childBBox);
-  const start = getAnchor(parentBBox, direction);
-  const end = getAnchor(childBBox, oppositeDirection(direction));
-  const style = theme.lineStyle;
-
-  switch (style) {
-    case 'straight':
-      return `M ${start.x} ${start.y} L ${end.x} ${end.y}`;
-    case 'polyline': {
-      const midX = (start.x + end.x) / 2;
-      return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
-    }
-    case 'bezier':
-    default: {
-      const midX = (start.x + end.x) / 2;
-      return `M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`;
-    }
-  }
-}
-
-export function inferDirection(
-  parentBBox: BBox,
-  childBBox: BBox
-): 'right' | 'left' | 'top' | 'bottom' {
-  const dx = childBBox.x + childBBox.width / 2 - (parentBBox.x + parentBBox.width / 2);
-  const dy = childBBox.y + childBBox.height / 2 - (parentBBox.y + parentBBox.height / 2);
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx >= 0 ? 'right' : 'left';
-  }
-  return dy >= 0 ? 'bottom' : 'top';
-}
-
-function oppositeDirection(
-  dir: 'right' | 'left' | 'top' | 'bottom'
-): 'right' | 'left' | 'top' | 'bottom' {
-  switch (dir) {
-    case 'right': return 'left';
-    case 'left': return 'right';
-    case 'top': return 'bottom';
-    case 'bottom': return 'top';
-  }
-}
-
-/** 根据 MindMapLayout + ConnectionStyle 映射为 Theme */
-export function toTheme(layout: MindMapLayout | undefined, connectionStyle: ConnectionStyle | undefined): Theme {
-  const mapLayoutToDirection: Record<MindMapLayout, Theme['direction']> = {
-    balanced: 'radial',
-    fishbone: 'right',
-    timeline: 'bottom',
-    org: 'bottom',
-    leftTree: 'left',
-    rightTree: 'right',
-  };
-  return {
-    ...DEFAULT_THEME,
-    direction: mapLayoutToDirection[layout ?? 'balanced'],
-    lineStyle: (connectionStyle === 'orthogonal' || connectionStyle === 'rounded') ? 'polyline' : (connectionStyle ?? 'bezier'),
-  };
 }
 
 /** 节点级别样式计算：根据层级和分支 */
