@@ -1159,8 +1159,8 @@ function renderDefaultConnections(
         return;
       }
 
-      const { x1, y1, x2, y2 } = connectionAnchors(node, child, layout, data.rootId);
-      const path = buildConnectionPath(x1, y1, x2, y2, connectionStyle);
+      const { x1, y1, x2, y2, orient } = connectionAnchors(node, child, layout, data.rootId);
+      const path = buildConnectionPath(x1, y1, x2, y2, connectionStyle, orient);
       lines.push(
         <path
           key={`${node.id}-${childId}`}
@@ -1318,7 +1318,7 @@ function connectionAnchors(
   child: MindNode,
   layout: string,
   rootId: NodeID
-): { x1: number; y1: number; x2: number; y2: number } {
+): { x1: number; y1: number; x2: number; y2: number; orient: 'h' | 'v' } {
   const px = parent.x ?? 0;
   const py = parent.y ?? 0;
   const pw = parent.width ?? 120;
@@ -1338,21 +1338,21 @@ function connectionAnchors(
   // 组织结构图：所有层级都是垂直分布
   if (layout === 'org') {
     return ccy >= pcy
-      ? { x1: pcx, y1: py + ph, x2: ccx, y2: cy }
-      : { x1: pcx, y1: py, x2: ccx, y2: cy + ch };
+      ? { x1: pcx, y1: py + ph, x2: ccx, y2: cy, orient: 'v' }
+      : { x1: pcx, y1: py, x2: ccx, y2: cy + ch, orient: 'v' };
   }
 
   // 时间轴布局：根节点到一级子节点固定使用垂直连接（避免根节点被水平线穿过）
   if (layout === 'timeline' && isRootChild) {
     return ccy >= pcy
-      ? { x1: pcx, y1: py + ph, x2: ccx, y2: cy }
-      : { x1: pcx, y1: py, x2: ccx, y2: cy + ch };
+      ? { x1: pcx, y1: py + ph, x2: ccx, y2: cy, orient: 'v' }
+      : { x1: pcx, y1: py, x2: ccx, y2: cy + ch, orient: 'v' };
   }
 
   // 平衡树、鱼骨图、时间轴的非根层级：统一使用水平连接
   return ccx >= pcx
-    ? { x1: px + pw, y1: pcy, x2: cx, y2: ccy }
-    : { x1: px, y1: pcy, x2: cx + cw, y2: ccy };
+    ? { x1: px + pw, y1: pcy, x2: cx, y2: ccy, orient: 'h' }
+    : { x1: px, y1: pcy, x2: cx + cw, y2: ccy, orient: 'h' };
 }
 
 function buildConnectionPath(
@@ -1360,7 +1360,8 @@ function buildConnectionPath(
   y1: number,
   x2: number,
   y2: number,
-  style: 'bezier' | 'straight' | 'orthogonal' | 'rounded'
+  style: 'bezier' | 'straight' | 'orthogonal' | 'rounded',
+  orient: 'h' | 'v' = 'h'
 ): string {
   // 退化线段（垂直或水平）直接用直线，避免 orthogonal/rounded 出现零长度折段
   if (x1 === x2 || y1 === y2) {
@@ -1385,6 +1386,12 @@ function buildConnectionPath(
     }
     case 'bezier':
     default: {
+      // 控制点方向跟随连线朝向：水平树用水平控制点，垂直树（组织结构图/时间轴根层级）
+      // 用垂直控制点——否则父到远端子节点的曲线会大幅横扫，压过中间兄弟节点
+      if (orient === 'v') {
+        const midY = (y1 + y2) / 2;
+        return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+      }
       const midX = (x1 + x2) / 2;
       return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
     }

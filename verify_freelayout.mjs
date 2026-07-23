@@ -1,6 +1,6 @@
 // 节点自由拖拽布局自动化自测脚本
 // 用法：先 `npm run dev` 启动 Vite（端口 1420），再 `node verify_freelayout.mjs`
-// 覆盖：自由拖拽/子树跟随/连线与便签跟随/撤销重做/重排后偏移保留/排序/复位/根节点可拖/缩放下拖拽增量
+// 覆盖：自由拖拽/子树跟随/连线与便签跟随/撤销重做/重排后偏移保留/复位/根节点可拖/缩放下拖拽增量
 import puppeteer from 'puppeteer-core';
 
 const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -248,15 +248,9 @@ try {
     `新增节点重排后，手动偏移未丢失（c2 相对根节点位移 ${diffBefore5.dx},${diffBefore5.dy} -> ${diffAfter5.dx},${diffAfter5.dy}）`
   );
 
-  // ---------- 6. 「排序」重排且偏移保留；「复位」清空偏移 ----------
-  console.log('6. 排序按钮重排（偏移保留），复位按钮清空偏移');
+  // ---------- 6. 「复位」清空偏移 ----------
+  console.log('6. 复位按钮清空偏移');
   const c1Before6 = await nodePos(page, c1);
-  await clickToolbarButton(page, '排序');
-  const c1AfterSort = await nodePos(page, c1);
-  assert(
-    Math.abs(c1AfterSort.left - c1Before6.left) < 1 && Math.abs(c1AfterSort.top - c1Before6.top) < 1,
-    '排序后位置不变（重排幂等，偏移保留）'
-  );
   const rootBefore6 = await nodePos(page, 'root');
   await clickToolbarButton(page, '复位');
   const [rootAfter6, c1After6, c2After6] = await Promise.all([nodePos(page, 'root'), nodePos(page, c1), nodePos(page, c2)]);
@@ -266,7 +260,7 @@ try {
   );
   // 复位消去的是各自的手动偏移（c1: +60/+30，c2: +100/+50），节点间相对差随之回退
   assert(
-    Math.abs(c1After6.left - rootAfter6.left - (c1AfterSort.left - rootBefore6.left) + 60) < 2,
+    Math.abs(c1After6.left - rootAfter6.left - (c1Before6.left - rootBefore6.left) + 60) < 2,
     '复位后 c1 相对根节点的横向位移回退手动偏移量'
   );
   assert(

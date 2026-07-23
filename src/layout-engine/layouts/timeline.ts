@@ -68,30 +68,45 @@ function layoutTimelineNode(node: WorkingNode, startX: number, startY: number, t
       totalWidth: Math.max(node.bbox.width, totalWidth),
     };
   } else {
-    // 二级及以下：沿 Y 方向上下交替分布
+    // 二级及以下：子节点排在节点右侧，沿 Y 方向按层数交替向下/向上展开
     const direction = depth % 2 === 1 ? 1 : -1; // 奇数层向下，偶数层向上（相对父节点）
-    let currentY = startY + node.bbox.height / 2;
+    const childX = startX + node.bbox.width + theme.levelGap;
 
+    // 先递归布局每个子节点，拿到各子树的真实 Y 占用区间（含更深层反向展开的过界部分）
+    let maxChildHeight = 0;
     for (const child of node.children) {
       const box = layoutTimelineNode(child, 0, 0, theme, depth + 1);
       childBoxes.push({ child, box });
+      maxChildHeight = Math.max(maxChildHeight, box.totalHeight);
       totalWidth = Math.max(totalWidth, box.totalWidth);
     }
 
-    const stepY = (node.bbox.height + theme.levelGap) * direction;
+    // 堆叠步长取「父节点高 + levelGap」与「最高子树 + siblingGap」的较大值：
+    // 简单树保持原有均匀间距的外观；某个分支子孙较多时步长随之增大，不再互相压叠
+    const stepY = Math.max(node.bbox.height + theme.levelGap, maxChildHeight + theme.siblingGap) * direction;
+    const centerY = startY + node.bbox.height / 2;
+    // totalHeight 必须反映子树的完整 Y 展开（自身 bbox 与所有子树占用区间的并集），
+    // 否则上层按被低估的值排间距，三级以上必然重叠。
+    // 注意：box 里存的是临时原点的坐标，平移后的实际位置要用本次计算出的 subtreeTop 累计
+    let top = startY;
+    let bottom = startY + node.bbox.height;
     childBoxes.forEach(({ child, box }, idx) => {
-      const childY = currentY + idx * stepY + (direction > 0 ? 0 : -box.totalHeight);
-      const childX = startX + node.bbox.width + theme.levelGap;
-      shiftSubtree(child, childX - box.x, childY - box.y);
+      // 向下：第 i 个子树的上边缘从父节点中心线起排；向上：下边缘从中心线起排
+      const subtreeTop = direction > 0 ? centerY + idx * stepY : centerY + idx * stepY - box.totalHeight;
+      shiftSubtree(child, childX - box.x, subtreeTop - box.y);
+      top = Math.min(top, subtreeTop);
+      bottom = Math.max(bottom, subtreeTop + box.totalHeight);
     });
+
+    const subtreeWidth = node.bbox.width + theme.levelGap + totalWidth;
 
     return {
       x: startX,
-      y: startY,
-      width: node.bbox.width + theme.levelGap + totalWidth,
-      height: node.bbox.height,
-      totalHeight: node.bbox.height,
-      totalWidth: node.bbox.width + theme.levelGap + totalWidth,
+      y: top,
+      width: subtreeWidth,
+      height: bottom - top,
+      totalHeight: bottom - top,
+      totalWidth: subtreeWidth,
     };
   }
 }

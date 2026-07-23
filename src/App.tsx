@@ -34,7 +34,6 @@ function App() {
     reorderNode,
     setNodeOffset,
     resetOffsets,
-    relayout,
     selectedIds,
     selectNodes,
     clipboard,
@@ -484,7 +483,6 @@ function App() {
           重做
         </button>
         <button onClick={() => canvasRef.current?.centerView()}>居中</button>
-        <button onClick={relayout} title="重新自动布局（保留手动偏移）">排序</button>
         <button onClick={resetOffsets} title="清空所有节点的手动偏移">复位</button>
         <button onClick={() => canvasRef.current?.zoomOut()} title="缩小">-</button>
         <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 48, textAlign: 'center' }}>{Math.round(scale * 100)}%</span>

@@ -324,11 +324,6 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
     });
   }, []);
 
-  // 重新执行自动布局（保留所有手动偏移）
-  const relayout = useCallback(() => {
-    setData((prev) => calculateTreeLayout({ ...prev }));
-  }, []);
-
   // 撤销/重做
   const undo = useCallback(() => {
     if (!canUndo) return;
@@ -510,7 +505,6 @@ export function useMindMap() {  const [data, setData] = useState<MindMapData>(()
     reorderNode,
     setNodeOffset,
     resetOffsets,
-    relayout,
     selectedIds,
     selectNodes,
     clipboard,
