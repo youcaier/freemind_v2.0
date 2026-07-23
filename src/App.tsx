@@ -66,6 +66,7 @@ function App() {
     saveAs,
     openFile,
     openRecentFile,
+    importMarkdownFile,
     markDirty,
   } = useFilePersistence();
 
@@ -435,6 +436,12 @@ function App() {
     };
   }, []);
 
+  // 加载新文档（新建/打开/导入）后把视图居中到根节点。
+  // setData 是异步的，延迟到下一拍渲染完成后 centerView 才能读到新数据
+  const recenterAfterLoad = useCallback(() => {
+    setTimeout(() => canvasRef.current?.centerView(), 0);
+  }, []);
+
   return (
     <div className="app" data-theme={theme}>
       {!isPresentationMode && (
@@ -451,12 +458,23 @@ function App() {
               layout: 'balanced',
               connectionStyle: 'bezier',
             }));
+            recenterAfterLoad();
           }}
           onOpen={() => {
             openFile().then((loaded) => {
               if (!loaded) return;
               skipDirtyRef.current = true;
               setData(calculateTreeLayout(loaded));
+              recenterAfterLoad();
+            });
+          }}
+          onImportMarkdown={() => {
+            importMarkdownFile().then((loaded) => {
+              if (!loaded) return;
+              // 导入结果是未保存的新脑图：选中根节点，数据替换后由脏检查自动置脏
+              selectNode(loaded.rootId);
+              setData(loaded);
+              recenterAfterLoad();
             });
           }}
           onSave={() => saveFile(data, currentPath ?? undefined)}
@@ -468,6 +486,7 @@ function App() {
               if (loaded) {
                 skipDirtyRef.current = true;
                 setData(calculateTreeLayout(loaded));
+                recenterAfterLoad();
               }
             }).catch(() => {});
           }}

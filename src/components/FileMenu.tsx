@@ -4,6 +4,7 @@ import './FileMenu.css';
 export interface FileMenuProps {
   onNew: () => void;
   onOpen: () => void;
+  onImportMarkdown: () => void;
   onSave: () => void;
   onSaveAs: () => void;
   onExport: () => void;
@@ -18,6 +19,7 @@ export interface FileMenuProps {
 export function FileMenu({
   onNew,
   onOpen,
+  onImportMarkdown,
   onSave,
   onSaveAs,
   onExport,
@@ -70,6 +72,9 @@ export function FileMenu({
           <button className="file-menu-item" onClick={() => { onOpen(); setOpen(false); }}>
             <span>打开</span>
             <span className="file-menu-shortcut">⌘O</span>
+          </button>
+          <button className="file-menu-item" onClick={() => { onImportMarkdown(); setOpen(false); }}>
+            <span>导入 Markdown…</span>
           </button>
           <button className="file-menu-item" onClick={() => { onSave(); setOpen(false); }}>
             <span>保存</span>

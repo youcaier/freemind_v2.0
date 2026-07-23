@@ -2,9 +2,11 @@ import { useCallback, useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import type { MindMapData } from '@/types/mindmap';
+import { parseMarkdownToMindMap } from '@/utils/importMarkdown';
 
 const FILE_EXTENSION = 'freemind';
 const FILE_FILTER = { name: 'Freemind', extensions: [FILE_EXTENSION] };
+const MARKDOWN_FILTER = { name: 'Markdown', extensions: ['md', 'markdown'] };
 const RECENT_FILES_KEY = 'freemind-recent-files';
 const AUTO_SAVE_KEY = 'freemind-auto-save';
 const MAX_RECENT_FILES = 10;
@@ -161,6 +163,21 @@ export function useFilePersistence() {
     [addRecentFile, removeRecentFile]
   );
 
+  // 导入 Markdown：解析为一张未保存的新脑图（清空当前路径、置脏，不加入最近文件）
+  const importMarkdownFile = useCallback(async (): Promise<MindMapData | null> => {
+    const selected = await open({
+      filters: [MARKDOWN_FILTER],
+      multiple: false,
+    });
+    if (!selected || Array.isArray(selected)) return null;
+
+    const content = (await invoke('read_text_file', { path: selected })) as string;
+    const data = parseMarkdownToMindMap(content);
+    setCurrentPath(null);
+    setIsDirty(true);
+    return data;
+  }, []);
+
   return {
     currentPath,
     recentFiles,
@@ -172,6 +189,7 @@ export function useFilePersistence() {
     saveAs,
     openFile,
     openRecentFile,
+    importMarkdownFile,
     markDirty,
     clearDirty,
   };
